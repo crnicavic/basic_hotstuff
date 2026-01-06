@@ -44,18 +44,23 @@ class QC:
 class Replica:
     log = []; # array of blocks (will change probably)
     # collection of local variables
-    vheight = None
+    current_view = None
     b_exec = None
     b_lock = None
+	replica_id = None
 
-
-    def __init__(self, vheight, b_exec, b_lock):
-        self.vheight = vheight
+    def __init__(self, view, b_exec, b_lock, replica_id):
+        self.current_view = view
         self.b_exec = b_exec
         self.b_lock = b_lock
+		self.replica_id = 
 
     def on_client_request(self, message):
-        # new view
+        # send new view message
+		self.current_view += 1
+		leader_id = self.current_view % N
+		if leader_id != self.replica_id:
+			
         pass
 
     def on_message(self, message):
