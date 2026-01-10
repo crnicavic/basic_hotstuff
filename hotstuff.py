@@ -6,10 +6,14 @@ QUORUM = 2*F+1
 NEW_VIEW = 5421315
 
 class Message_types:
-	NEW_VIEW = 5421315
-	PREPARE = 5421316
-	PREPARE_VOTE = 5421317
-	PRECOMMIT = 5421318
+	NEW_VIEW = 5421310
+	PREPARE = 5421311
+	PREPARE_VOTE = 5421312
+	PRECOMMIT = 5421313
+	PRECOMMIT_VOTE = 5421314
+	COMMIT = 5421315
+	COMMIT_VOTE = 5421316
+	DECIDE = 5421317
 
 class Block:
 	def __init__(self, cmds, parent, view):
@@ -65,7 +69,10 @@ class Replica:
 		# dictionaries of arrays per view (later use only one array)
 		self.new_view_msgs = {}
 		self.prepare_votes = {}
+		self.precommit_votes = {}
+		self.commit_votes = {}
 		self.high_prepare_qc = GENESIS_QC
+		self.locked_qc = GENESIS_QC
 		self.replicas = []
 
 	def extends(self, block):
@@ -83,10 +90,10 @@ class Replica:
 
 		leader = self.replicas[(view + 1) % N]
 		new_view_msg = Message(NEW_VIEW, self.current_view, None, self.high_prepare_qc)	
-		leader.on_new_view(new_view_msg)
+		leader.collect_new_view(new_view_msg)
 		return
 
-	def on_new_view(self, msg):
+	def collect_new_view(self, msg):
 		if msg.view_number not in self.new_view_msgs:
 			self.new_view_msgs[msg.view_number] = [msg]
 		else:
@@ -115,6 +122,7 @@ class Replica:
 	def examine_prepare_proposal(self, msg):
 		if msg.view_number > self.current_view:
 			self.current_view = msg.view_number
+
 		leader = self.replicas[msg.view_number % N]
 		print(f"received proposal for {msg.block} from {leader}")
 		if self.extends(msg.block):
@@ -127,32 +135,118 @@ class Replica:
 				None, # specification doesnt send this
 				self.replica_id # this is the signature :D
 			)
-			leader.on_prepare_vote(vote_msg)
+			leader.collect_prepare_votes(vote_msg)
 	
-	def on_prepare_vote(self, vote_msg):
+	def collect_prepare_votes(self, vote_msg):
 		if vote_msg.view_number not in self.prepare_votes:
 			self.prepare_votes[vote_msg.view_number] = [vote_msg]
 		else:
 			self.prepare_votes[vote_msg.view_number].append(vote_msg)
 
+		#TODO: there should be a check if the messages reference the same block
+		# and view number
 		if len(self.prepare_votes[vote_msg.view_number]) == QUORUM:
 			qc = QC(
-				Message_types.PRECOMMIT,
+				Message_types.PREPARE,
 				self.current_view,
 				vote_msg.block
 			)
 			for m in self.prepare_votes[vote_msg.view_number]:
 				qc.voters.append(m.partial_sig)
 			self.high_prepare_qc = qc
-			print(f"leader formed QC {qc}")
 			precommit_msg = Message(
 				Message_types.PRECOMMIT,
 				self.current_view,
-				msg.block,
+				vote_msg.block,
+				qc
+			)
+			print(f"leader formed prepare QC {qc}")
+			for r in self.replicas:
+				r.examine_precommit(precommit_msg)
+
+	def examine_precommit(self, msg):
+		leader = self.replicas[msg.view_number % N]
+		
+		if msg.justify.view_number > self.high_prepare_qc.view_number:
+			print(f"received new high_prepare_qc {msg.justify}")
+			self.high_prepare_qc = msg.justify
+
+		vote_msg = Message(
+			Message_types.PRECOMMIT_VOTE,
+			self.current_view,
+			msg.justify.block,
+			None,
+			self.replica_id
+		)
+		leader.collect_precommit_votes(vote_msg)
+			
+	def collect_precommit_votes(self, vote_msg):
+		if vote_msg.view_number not in self.precommit_votes:
+			self.precommit_votes[vote_msg.view_number] = [vote_msg]
+		else:
+			self.precommit_votes[vote_msg.view_number].append(vote_msg)
+			print(self.precommit_votes)
+
+		if len(self.precommit_votes[vote_msg.view_number]) == QUORUM:
+			qc = QC(
+				Message_types.PRECOMMIT,
+				self.current_view,
+				vote_msg.block
+			)
+			print(f"leader formed precommit QC {qc}")
+			for m in self.precommit_votes[vote_msg.view_number]:
+				qc.voters.append(m.partial_sig)
+			commit_msg = Message(
+				Message_types.COMMIT,
+				self.current_view,
+				None,
 				qc
 			)
 			for r in self.replicas:
-				r.examine_precommit(precommit_msg)
+				r.examine_commit(commit_msg)
+	
+	def examine_commit(self, msg):
+		leader = self.replicas[msg.view_number % N]
+		
+		if msg.justify.view_number > self.locked_qc.view_number:
+			print(f"updated locked_qc {self.locked_qc}")
+
+		self.locked_qc = msg.justify
+		vote_msg = Message(
+			Message_types.COMMIT_VOTE,
+			self.current_view,
+			msg.justify.block,
+			None,
+			self.replica_id
+		)
+		leader.collect_commit_votes(vote_msg)
+	
+	def collect_commit_votes(self, vote_msg):
+		if vote_msg.view_number not in self.commit_votes:
+			self.commit_votes[vote_msg.view_number] = [vote_msg]
+		else:
+			self.commit_votes[vote_msg.view_number].append(vote_msg) 
+		
+		if len(self.commit_votes[vote_msg.view_number]) == QUORUM:
+			qc = QC(
+				Message_types.COMMIT,
+				self.current_view,
+				vote_msg.block
+			)
+			print(f"leader formed precommit QC {qc}")
+			for m in self.commit_votes[vote_msg.view_number]:
+				qc.voters.append(m.partial_sig)
+			decide_msg = Message(
+				Message_types.DECIDE,
+				self.current_view,
+				None,
+				qc
+			)	
+			for r in self.replicas:
+				r.examine_decision(decide_msg)
+	
+	def examine_decision(self, decide_msg):
+		print(f"executing {decide_msg.justify.block.cmds}")
 
 	def __str__(self):
 		ret = f"replica_id:{self.replica_id} on view:{self.current_view}"
@@ -168,6 +262,3 @@ if __name__ == "__main__":
 	for r in replicas:
 		r.on_client_request(0) 
 	
-#	for r in replicas:
-		#print(r)
-		#print(r.new_view_msgs)
