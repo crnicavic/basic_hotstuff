@@ -87,10 +87,12 @@ class Replica:
 		self.current_view = 0
 		self.log = [GENESIS_BLOCK]
 		# dictionaries of arrays per view (later use only one array)
+		
 		self.new_view_msgs = {}
 		self.prepare_votes = {}
 		self.precommit_votes = {}
 		self.commit_votes = {}
+
 		self.high_prepare_qc = GENESIS_QC
 		self.locked_qc = GENESIS_QC
 		self.replicas = []
@@ -107,13 +109,18 @@ class Replica:
 	def safe_block(self, block, qc):
 		return self.extends(block, self.locked_qc.block) or (qc.view_number > self.locked_qc.view_number)
 
-	def on_client_request(self, view):
-		# i don't want unpredictable behaviour in this model
-		if view < self.current_view:
-			return
+	def start_new_view(self, new_view):
+		if new_view <= self.current_view:
+			return None
 
-		leader = self.replicas[(view + 1) % N]
-		new_view_msg = Message(NEW_VIEW, self.current_view, None, self.high_prepare_qc)	
+		self.current_view = new_view
+
+		new_view_msg = Message(
+			Message_types.NEW_VIEW,
+			new_view,
+			None,
+			self.high_prepare_qc
+		)	
 		return new_view_msg
 
 	# PREPARE - LEADER
@@ -126,7 +133,6 @@ class Replica:
 			self.new_view_msgs[msg.view_number].append(msg)
 
 		if len(self.new_view_msgs[msg.view_number]) == QUORUM:
-			self.current_view += 1
 			sort_lambda = lambda m: m.justify.view_number 
 			self.new_view_msgs[msg.view_number].sort(key=sort_lambda)
 			self.high_prepare_qc = self.new_view_msgs[msg.view_number][-1].justify
@@ -147,7 +153,7 @@ class Replica:
 	# PREPARE - REPLICA
 	def examine_prepare_proposal(self, msg):
 		if not matching_msg(msg, Message_types.PREPARE, self.current_view):
-			return
+			return None
 		
 		if msg.view_number > self.current_view:
 			self.current_view = msg.view_number
@@ -169,7 +175,7 @@ class Replica:
 	# PRECOMMIT-LEADER
 	def collect_prepare_votes(self, vote_msg):
 		if not matching_msg(vote_msg, Message_types.PREPARE_VOTE, self.current_view):
-			return
+			return None
 		elif vote_msg.view_number not in self.prepare_votes:
 			self.prepare_votes[vote_msg.view_number] = [vote_msg]
 		else:
@@ -199,10 +205,8 @@ class Replica:
 	# PRECOMMIT - REPLICA
 	def examine_precommit(self, msg):
 		if not matching_qc(msg.justify, Message_types.PREPARE, self.current_view):
-			return
+			return None
 		
-		if msg.view_number > self.current_view:
-			self.current_view = msg.view_number
 
 		if msg.justify.view_number > self.high_prepare_qc.view_number:
 			print(f"received new high_prepare_qc {msg.justify}")
@@ -220,7 +224,7 @@ class Replica:
 	# COMMIT - LEADER
 	def collect_precommit_votes(self, vote_msg):
 		if not matching_msg(vote_msg, Message_types.PRECOMMIT_VOTE, self.current_view):
-			return
+			return None
 		elif vote_msg.view_number not in self.precommit_votes:
 			self.precommit_votes[vote_msg.view_number] = [vote_msg]
 		else:
@@ -247,12 +251,7 @@ class Replica:
 	# COMMIT - replica
 	def examine_commit(self, msg):
 		if not matching_qc(msg.justify, Message_types.PRECOMMIT, self.current_view):
-			return
-		
-		if msg.view_number > self.current_view:
-			self.current_view = msg.view_number
-
-		leader = self.replicas[msg.view_number % N]
+			return None
 		
 		if msg.justify.view_number > self.locked_qc.view_number:
 			print(f"updated locked_qc {self.locked_qc}")
@@ -270,7 +269,7 @@ class Replica:
 	# DECIDE - LEADER
 	def collect_commit_votes(self, vote_msg):
 		if not matching_msg(vote_msg, Message_types.COMMIT_VOTE, self.current_view):
-			return
+			return None
 		elif vote_msg.view_number not in self.commit_votes:
 			self.commit_votes[vote_msg.view_number] = [vote_msg]
 		else:
@@ -297,33 +296,29 @@ class Replica:
 	# DECIDE - REPLICA
 	def examine_decision(self, decide_msg):
 		if not matching_qc(decide_msg.justify, Message_types.COMMIT, self.current_view):
-			return
+			return None
 		print(f"executing {decide_msg.justify.block.cmds}")
+		self.log.append(decide_msg.justify.block)
 
 	def __str__(self):
 		ret = f"replica_id:{self.replica_id} on view:{self.current_view}"
 		return ret
-	
 
-if __name__ == "__main__":
-
-	view = 1
-	replicas = [Replica(i) for i in range(N)] 
-	for r in replicas:
-		r.replicas = replicas
-	
+def simulate(replicas, view):
 	leader = replicas[view % N]
 
 	new_view_messages = []
 	for r in replicas:
-		new_view_messages.append(r.on_client_request(0)) 
-	
+		new_view_messages.append(r.start_new_view(view)) 
+
 	proposal_msg = None
 	for m in new_view_messages:
 		proposal_msg = leader.collect_new_view(m)
 		if proposal_msg is not None:
 			break
-
+	if proposal_msg is None:
+		print("not able to reach prepare phase")
+		return
 	prepare_votes = []
 	for r in replicas:
 		prepare_votes.append(r.examine_prepare_proposal(proposal_msg))
@@ -357,3 +352,16 @@ if __name__ == "__main__":
 	for r in replicas:
 		r.examine_decision(decide_msg)
 
+
+
+if __name__ == "__main__":
+	replicas = [Replica(i) for i in range(N)] 
+	for r in replicas:
+		r.replicas = replicas
+
+	for view in range(1, 4):
+		simulate(replicas, view)
+
+	for r in replicas:
+		print(r.log)
+		print(r.locked_qc)
