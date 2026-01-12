@@ -36,7 +36,7 @@ class Block:
 		return f"Block(height:{self.view}, command: {self.cmds})"
 	
 	def __eq__(self, other):
-		return self.cmds == other.cmds and self.height == other.height
+		return isinstance(other, Block) and self.hash == other.hash
 
 GENESIS_BLOCK = Block([], None, 0)
 
@@ -96,15 +96,16 @@ class Replica:
 		self.replicas = []
 
 	def extends(self, new_block, from_block):
+		# climb the starting with the new block and return true if from_block is a parent
 		current_block = new_block
-		while new_block.parent.hash != current_block.hash:
+		while current_block.hash != from_block.hash:
 			if current_block.parent is None:
 				return False
 			current_block = current_block.parent
 		return True
 
 	def safe_block(self, block, qc):
-		return extends(block, locked_qc.block) or (qc.view_number > locked_qc.view_number)
+		return self.extends(block, self.locked_qc.block) or (qc.view_number > self.locked_qc.view_number)
 
 	def on_client_request(self, view):
 		# i don't want unpredictable behaviour in this model
@@ -115,8 +116,11 @@ class Replica:
 		new_view_msg = Message(NEW_VIEW, self.current_view, None, self.high_prepare_qc)	
 		return new_view_msg
 
+	# PREPARE - LEADER
 	def collect_new_view(self, msg):
-		if msg.view_number not in self.new_view_msgs:
+		if not matching_msg(msg, Message_types.NEW_VIEW, self.current_view):
+			return None
+		elif msg.view_number not in self.new_view_msgs:
 			self.new_view_msgs[msg.view_number] = [msg]
 		else:
 			self.new_view_msgs[msg.view_number].append(msg)
@@ -140,13 +144,17 @@ class Replica:
 			return proposal_msg
 		return None
 
+	# PREPARE - REPLICA
 	def examine_prepare_proposal(self, msg):
+		if not matching_msg(msg, Message_types.PREPARE, self.current_view):
+			return
+		
 		if msg.view_number > self.current_view:
 			self.current_view = msg.view_number
 
 		leader = self.replicas[msg.view_number % N]
 		print(f"received proposal for {msg.block} from {leader}")
-		if self.extends(msg.block, msg.justify.block):
+		if self.extends(msg.block, msg.justify.block) and self.safe_block(msg.block, msg.justify):
 			#send vote or rather send signature
 			print(f"replica {self.replica_id} voted for {msg.block}")
 			vote_msg = Message(
@@ -158,8 +166,11 @@ class Replica:
 			)
 			return vote_msg
 	
+	# PRECOMMIT-LEADER
 	def collect_prepare_votes(self, vote_msg):
-		if vote_msg.view_number not in self.prepare_votes:
+		if not matching_msg(vote_msg, Message_types.PREPARE_VOTE, self.current_view):
+			return
+		elif vote_msg.view_number not in self.prepare_votes:
 			self.prepare_votes[vote_msg.view_number] = [vote_msg]
 		else:
 			self.prepare_votes[vote_msg.view_number].append(vote_msg)
@@ -185,12 +196,14 @@ class Replica:
 			return precommit_msg
 		return None
 
+	# PRECOMMIT - REPLICA
 	def examine_precommit(self, msg):
+		if not matching_qc(msg.justify, Message_types.PREPARE, self.current_view):
+			return
+		
 		if msg.view_number > self.current_view:
 			self.current_view = msg.view_number
 
-		leader = self.replicas[msg.view_number % N]
-		
 		if msg.justify.view_number > self.high_prepare_qc.view_number:
 			print(f"received new high_prepare_qc {msg.justify}")
 			self.high_prepare_qc = msg.justify
@@ -203,9 +216,12 @@ class Replica:
 			self.replica_id
 		)
 		return vote_msg
-			
+	
+	# COMMIT - LEADER
 	def collect_precommit_votes(self, vote_msg):
-		if vote_msg.view_number not in self.precommit_votes:
+		if not matching_msg(vote_msg, Message_types.PRECOMMIT_VOTE, self.current_view):
+			return
+		elif vote_msg.view_number not in self.precommit_votes:
 			self.precommit_votes[vote_msg.view_number] = [vote_msg]
 		else:
 			self.precommit_votes[vote_msg.view_number].append(vote_msg)
@@ -228,7 +244,11 @@ class Replica:
 			return commit_msg
 		return None
 	
+	# COMMIT - replica
 	def examine_commit(self, msg):
+		if not matching_qc(msg.justify, Message_types.PRECOMMIT, self.current_view):
+			return
+		
 		if msg.view_number > self.current_view:
 			self.current_view = msg.view_number
 
@@ -247,8 +267,11 @@ class Replica:
 		)
 		return vote_msg
 	
+	# DECIDE - LEADER
 	def collect_commit_votes(self, vote_msg):
-		if vote_msg.view_number not in self.commit_votes:
+		if not matching_msg(vote_msg, Message_types.COMMIT_VOTE, self.current_view):
+			return
+		elif vote_msg.view_number not in self.commit_votes:
 			self.commit_votes[vote_msg.view_number] = [vote_msg]
 		else:
 			self.commit_votes[vote_msg.view_number].append(vote_msg) 
@@ -271,7 +294,10 @@ class Replica:
 			return decide_msg
 		return None
 	
+	# DECIDE - REPLICA
 	def examine_decision(self, decide_msg):
+		if not matching_qc(decide_msg.justify, Message_types.COMMIT, self.current_view):
+			return
 		print(f"executing {decide_msg.justify.block.cmds}")
 
 	def __str__(self):
@@ -280,7 +306,7 @@ class Replica:
 	
 
 if __name__ == "__main__":
-	# more code that does nothing, but it is clear what is happening
+
 	view = 1
 	replicas = [Replica(i) for i in range(N)] 
 	for r in replicas:
