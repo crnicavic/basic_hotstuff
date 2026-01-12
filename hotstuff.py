@@ -155,9 +155,6 @@ class Replica:
 		if not matching_msg(msg, Message_types.PREPARE, self.current_view):
 			return None
 		
-		if msg.view_number > self.current_view:
-			self.current_view = msg.view_number
-
 		leader = self.replicas[msg.view_number % N]
 		print(f"received proposal for {msg.block} from {leader}")
 		if self.extends(msg.block, msg.justify.block) and self.safe_block(msg.block, msg.justify):
@@ -281,7 +278,7 @@ class Replica:
 				self.current_view,
 				vote_msg.block
 			)
-			print(f"leader formed precommit QC {qc}")
+			print(f"leader formed commit QC {qc}")
 			for m in self.commit_votes[vote_msg.view_number]:
 				qc.voters.append(m.partial_sig)
 			decide_msg = Message(
