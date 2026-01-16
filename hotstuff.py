@@ -119,6 +119,7 @@ class Replica:
 	async def broadcast(self, msg):
 		msg.sender = self.replica_id
 		await self.network.broadcast(msg)
+
 	# NEW-VIEW - replica
 	async def start_new_view(self, new_view):
 		if new_view <= self.current_view:
@@ -129,7 +130,6 @@ class Replica:
 		
 		self.trace(f"Entering view {new_view} {'(LEADER)' if self.is_leader else ''}")
 		
-		# Send new-view message to leader
 		leader_id = self.get_leader(new_view)
 		msg = Message(
 			Message_types.NEW_VIEW,
@@ -139,6 +139,7 @@ class Replica:
 			self.replica_id
 		)
 		await self.send(leader_id, msg)
+
 	# PREPARE - leader
 	async def handle_new_view(self, msg):
 		if not self.is_leader or not matching_msg(msg, Message_types.NEW_VIEW, self.current_view):
@@ -168,7 +169,7 @@ class Replica:
 				highest_qc
 			)
 			
-			self.trace(f"Leader broadcasting PREPARE")
+			self.trace(f"Leader proposing {proposal_block}")
 			await self.broadcast(proposal_msg)
 
 	# PREPARE - replica
@@ -177,7 +178,7 @@ class Replica:
 			return
 		
 		if self.extends(msg.block, msg.justify.block) and self.safe_block(msg.block, msg.justify):
-			self.trace(f"Voting PREPARE for {msg.block}")
+			self.trace(f"Voting for {msg.block}")
 			
 			vote_msg = Message(
 				Message_types.PREPARE_VOTE,
@@ -189,6 +190,7 @@ class Replica:
 			
 			leader_id = self.get_leader(self.current_view)
 			await self.send(leader_id, vote_msg)
+
 	# PRECOMMIT - leader
 	async def handle_prepare_vote(self, msg):
 		if not self.is_leader or not matching_msg(msg, Message_types.PREPARE_VOTE, self.current_view):
