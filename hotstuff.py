@@ -323,9 +323,10 @@ class Replica:
 		if not matching_qc(msg.justify, Message_types.COMMIT, self.current_view):
 			return
 		
-		self.trace(f"EXECUTING {msg.justify.block.cmds}")
+		self.trace(f"Executing {msg.justify.block.cmds}")
 		self.log.append(msg.justify.block)
 		
+		# let others catch-up
 		await asyncio.sleep(0.1)
 		await self.start_new_view(self.current_view + 1)
 
@@ -359,20 +360,38 @@ class Replica:
 		await self.start_new_view(1)
 		await self.message_handler()
 
-
+# replica's way of talking with the world
 class Network:
-	def __init__(self, delay_ms=10):
-		self.replicas: Dict[int, Replica] = {}
-		self.delay_ms = delay_ms
-	
+	def __init__(self, host='localhost', port=50000):
+		self.server = await asyncio.start_server(recv, host, port)
+		# i need some structure that knows the replica id and address
+		self.address_book = {} # replica_id -> (host: string, port: int)
+		self.conns = {} # replica_id -> (reader, writer)
+		
 	def register_replica(self, replica: Replica):
 		self.replicas[replica.replica_id] = replica
+
+	async def connect(self, replica_id):
+		if replica_id in self.conns and replica_id not in self.address_book:
+			return
+
+		host, port = self.address_book[replica_id]
+		self.conns[replica_id] = asyncio.open_connection(host, port)
+		pass
+
+	async def recv(self):
+		while True:
+			packet_bytes = await reader.readexactly(4)
+			
+			packet = await reader.read(4096)
+			if not packet:
+				continue
+			msg = pickle.loads(packet)
+			print(msg)
 	
 	async def send(self, recipient_id: int, msg: Message):
-		await asyncio.sleep(self.delay_ms / 1000.0)
-		if recipient_id in self.replicas:
-			await self.replicas[recipient_id].inbox.put(msg)
-	
+		pass	
+
 	async def broadcast(self, msg: Message):
 		tasks = []
 		for replica_id in self.replicas:
