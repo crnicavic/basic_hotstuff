@@ -1,12 +1,14 @@
-from enum import Enum
+import asyncio
 import hashlib
+from enum import Enum
+from typing import Optional, Dict, List
 
 N = 4
 F = 1
 QUORUM = 2*F+1
-NEW_VIEW = 5421315
 
-class Message_types:
+# some numbers that aren't 0, 1 and so forth
+class Message_types(Enum):
 	NEW_VIEW = 5421310
 	PREPARE = 5421311
 	PREPARE_VOTE = 5421312
@@ -16,16 +18,18 @@ class Message_types:
 	COMMIT_VOTE = 5421316
 	DECIDE = 5421317
 
+	def __str__(self):
+		return self.name
+
 class Block:
 	def __init__(self, cmds, parent, view):
 		self.cmds = cmds
 		self.parent = parent
-		self.view = view;
+		self.view = view
 		self.hash = self.compute_hash()
 
 	def compute_hash(self):
 		h = hashlib.sha256()
-		# convert to bytestring
 		h.update(str(self.cmds).encode())
 		h.update(str(self.view).encode())
 		parent_hash = self.parent.hash if self.parent else "genesis"
@@ -33,7 +37,7 @@ class Block:
 		return h.hexdigest()
 	
 	def __str__(self):
-		return f"Block(height:{self.view}, command: {self.cmds})"
+		return f"Block(v:{self.view}, cmd:{self.cmds})"
 	
 	def __eq__(self, other):
 		return isinstance(other, Block) and self.hash == other.hash
@@ -48,57 +52,52 @@ class QC:
 		self.voters = []
 
 	def __str__(self):
-		ret = f"QC(type:{self.qc_type};"
-		ret += f"view_number:{self.view_number};"
-		ret += f"block:{self.block};"
-		ret += f"voters:{self.voters};)"
-		return ret
+		return f"QC(type:{self.qc_type}, view:{self.view_number})"
 
 def matching_qc(qc, t, v):
 	return qc.qc_type == t and qc.view_number == v
 
-GENESIS_QC = QC(
-		Message_types.PREPARE,
-		0,
-		GENESIS_BLOCK
-)
+GENESIS_QC = QC(Message_types.PREPARE, 0, GENESIS_BLOCK)
 
 class Message:
-	def __init__(self, msg_type, view_number, block, qc, sig=None):
+	def __init__(self, msg_type, view_number, block, qc, sig=None, sender=None):
 		self.msg_type = msg_type
 		self.view_number = view_number
 		self.block = block
 		self.justify = qc 
-		self.partial_sig = sig 
+		self.partial_sig = sig
+		self.sender = sender
 	
 	def __repr__(self):
-		ret = f"Message(type:{self.msg_type};"
-		ret += f"view_number:{self.view_number};"
-		ret += f"block:{self.block};"
-		ret += f"justify_qc:{self.justify};)"
-		return ret
+		return f"Msg(type:{self.msg_type}, view:{self.view_number}, from:{self.sender})"
 
 def matching_msg(m, t, v):
 	return m.msg_type == t and m.view_number == v
 
 class Replica:
-	def __init__(self, replica_id):
+	def __init__(self, replica_id, network):
 		self.replica_id = replica_id
+		self.network = network
 		self.current_view = 0
 		self.log = [GENESIS_BLOCK]
-		# dictionaries of arrays per view (later use only one array)
+		
+		self.inbox = asyncio.Queue()
 		
 		self.new_view_msgs = {}
 		self.prepare_votes = {}
 		self.precommit_votes = {}
 		self.commit_votes = {}
-
+		
 		self.high_prepare_qc = GENESIS_QC
 		self.locked_qc = GENESIS_QC
-		self.replicas = []
+		
+		self.is_leader = False
+		self.running = True
+
+	def trace(self, string):
+		print(f"[R{self.replica_id}] {string}")
 
 	def extends(self, new_block, from_block):
-		# climb the starting with the new block and return true if from_block is a parent
 		current_block = new_block
 		while current_block.hash != from_block.hash:
 			if current_block.parent is None:
@@ -107,108 +106,128 @@ class Replica:
 		return True
 
 	def safe_block(self, block, qc):
-		return self.extends(block, self.locked_qc.block) or (qc.view_number > self.locked_qc.view_number)
+		return (self.extends(block, self.locked_qc.block) or 
+		        (qc.view_number > self.locked_qc.view_number))
 
-	def start_new_view(self, new_view):
+	def get_leader(self, view):
+		return view % N
+
+	async def send(self, recipient_id, msg):
+		msg.sender = self.replica_id
+		await self.network.send(recipient_id, msg)
+
+	async def broadcast(self, msg):
+		msg.sender = self.replica_id
+		await self.network.broadcast(msg)
+	# NEW-VIEW - replica
+	async def start_new_view(self, new_view):
 		if new_view <= self.current_view:
-			return None
-
+			return
+		
 		self.current_view = new_view
-
-		new_view_msg = Message(
+		self.is_leader = (self.get_leader(new_view) == self.replica_id)
+		
+		self.trace(f"Entering view {new_view} {'(LEADER)' if self.is_leader else ''}")
+		
+		# Send new-view message to leader
+		leader_id = self.get_leader(new_view)
+		msg = Message(
 			Message_types.NEW_VIEW,
 			new_view,
 			None,
-			self.high_prepare_qc
-		)	
-		return new_view_msg
-
-	# PREPARE - LEADER
-	def collect_new_view(self, msg):
-		if not matching_msg(msg, Message_types.NEW_VIEW, self.current_view):
-			return None
-		elif msg.view_number not in self.new_view_msgs:
-			self.new_view_msgs[msg.view_number] = [msg]
-		else:
-			self.new_view_msgs[msg.view_number].append(msg)
-
+			self.high_prepare_qc,
+			self.replica_id
+		)
+		await self.send(leader_id, msg)
+	# PREPARE - leader
+	async def handle_new_view(self, msg):
+		if not self.is_leader or not matching_msg(msg, Message_types.NEW_VIEW, self.current_view):
+			return
+		
+		if msg.view_number not in self.new_view_msgs:
+			self.new_view_msgs[msg.view_number] = []
+		
+		self.new_view_msgs[msg.view_number].append(msg)
+		
 		if len(self.new_view_msgs[msg.view_number]) == QUORUM:
-			sort_lambda = lambda m: m.justify.view_number 
-			self.new_view_msgs[msg.view_number].sort(key=sort_lambda)
-			self.high_prepare_qc = self.new_view_msgs[msg.view_number][-1].justify
+			highest_qc = max(
+				self.new_view_msgs[msg.view_number],
+				key=lambda m: m.justify.view_number
+			).justify
+			
 			proposal_block = Block(
 				f"cmd_{self.current_view}",
-				self.high_prepare_qc.block,
+				highest_qc.block,
 				self.current_view
 			)
+			
 			proposal_msg = Message(
 				Message_types.PREPARE,
 				self.current_view,
 				proposal_block,
-				self.high_prepare_qc
+				highest_qc
 			)
-			return proposal_msg
-		return None
+			
+			self.trace(f"Leader broadcasting PREPARE")
+			await self.broadcast(proposal_msg)
 
-	# PREPARE - REPLICA
-	def examine_prepare_proposal(self, msg):
+	# PREPARE - replica
+	async def handle_prepare(self, msg):
 		if not matching_msg(msg, Message_types.PREPARE, self.current_view):
-			return None
+			return
 		
-		leader = self.replicas[msg.view_number % N]
-		print(f"received proposal for {msg.block} from {leader}")
 		if self.extends(msg.block, msg.justify.block) and self.safe_block(msg.block, msg.justify):
-			#send vote or rather send signature
-			print(f"replica {self.replica_id} voted for {msg.block}")
+			self.trace(f"Voting PREPARE for {msg.block}")
+			
 			vote_msg = Message(
 				Message_types.PREPARE_VOTE,
 				self.current_view,
 				msg.block,
-				None, # specification doesnt send this
-				self.replica_id # this is the signature :D
+				None,
+				self.replica_id
 			)
-			return vote_msg
-	
-	# PRECOMMIT-LEADER
-	def collect_prepare_votes(self, vote_msg):
-		if not matching_msg(vote_msg, Message_types.PREPARE_VOTE, self.current_view):
-			return None
-		elif vote_msg.view_number not in self.prepare_votes:
-			self.prepare_votes[vote_msg.view_number] = [vote_msg]
-		else:
-			self.prepare_votes[vote_msg.view_number].append(vote_msg)
-
-		#TODO: there should be a check if the messages reference the same block
-		# and view number
-		if len(self.prepare_votes[vote_msg.view_number]) == QUORUM:
+			
+			leader_id = self.get_leader(self.current_view)
+			await self.send(leader_id, vote_msg)
+	# PRECOMMIT - leader
+	async def handle_prepare_vote(self, msg):
+		if not self.is_leader or not matching_msg(msg, Message_types.PREPARE_VOTE, self.current_view):
+			return
+		
+		if msg.view_number not in self.prepare_votes:
+			self.prepare_votes[msg.view_number] = []
+		
+		self.prepare_votes[msg.view_number].append(msg)
+		
+		if len(self.prepare_votes[msg.view_number]) == QUORUM:
 			qc = QC(
 				Message_types.PREPARE,
 				self.current_view,
-				vote_msg.block
+				msg.block
 			)
-			for m in self.prepare_votes[vote_msg.view_number]:
-				qc.voters.append(m.partial_sig)
+			for vote in self.prepare_votes[msg.view_number]:
+				qc.voters.append(vote.partial_sig)
+			
 			self.high_prepare_qc = qc
+			
+			self.trace(f"Leader formed {qc}")
+			
 			precommit_msg = Message(
 				Message_types.PRECOMMIT,
 				self.current_view,
-				vote_msg.block,
+				None,
 				qc
 			)
-			print(f"leader formed prepare QC {qc}")
-			return precommit_msg
-		return None
+			await self.broadcast(precommit_msg)
 
-	# PRECOMMIT - REPLICA
-	def examine_precommit(self, msg):
+	# PRECOMMIT - replica
+	async def handle_precommit(self, msg):
 		if not matching_qc(msg.justify, Message_types.PREPARE, self.current_view):
-			return None
+			return
 		
-
 		if msg.justify.view_number > self.high_prepare_qc.view_number:
-			print(f"received new high_prepare_qc {msg.justify}")
 			self.high_prepare_qc = msg.justify
-
+		
 		vote_msg = Message(
 			Message_types.PRECOMMIT_VOTE,
 			self.current_view,
@@ -216,44 +235,47 @@ class Replica:
 			None,
 			self.replica_id
 		)
-		return vote_msg
-	
-	# COMMIT - LEADER
-	def collect_precommit_votes(self, vote_msg):
-		if not matching_msg(vote_msg, Message_types.PRECOMMIT_VOTE, self.current_view):
-			return None
-		elif vote_msg.view_number not in self.precommit_votes:
-			self.precommit_votes[vote_msg.view_number] = [vote_msg]
-		else:
-			self.precommit_votes[vote_msg.view_number].append(vote_msg)
+		
+		leader_id = self.get_leader(self.current_view)
+		await self.send(leader_id, vote_msg)
 
-		if len(self.precommit_votes[vote_msg.view_number]) == QUORUM:
+	# COMMIT - leader
+	async def handle_precommit_vote(self, msg):
+		if not self.is_leader or not matching_msg(msg, Message_types.PRECOMMIT_VOTE, self.current_view):
+			return
+		
+		if msg.view_number not in self.precommit_votes:
+			self.precommit_votes[msg.view_number] = []
+		
+		self.precommit_votes[msg.view_number].append(msg)
+		
+		if len(self.precommit_votes[msg.view_number]) == QUORUM:
 			qc = QC(
 				Message_types.PRECOMMIT,
 				self.current_view,
-				vote_msg.block
+				msg.block
 			)
-			print(f"leader formed precommit QC {qc}")
-			for m in self.precommit_votes[vote_msg.view_number]:
-				qc.voters.append(m.partial_sig)
+			for vote in self.precommit_votes[msg.view_number]:
+				qc.voters.append(vote.partial_sig)
+			
+			self.trace(f"Leader formed {qc}")
+			
 			commit_msg = Message(
 				Message_types.COMMIT,
 				self.current_view,
 				None,
 				qc
 			)
-			return commit_msg
-		return None
-	
+			await self.broadcast(commit_msg)
+
 	# COMMIT - replica
-	def examine_commit(self, msg):
+	async def handle_commit(self, msg):
 		if not matching_qc(msg.justify, Message_types.PRECOMMIT, self.current_view):
-			return None
+			return
 		
 		if msg.justify.view_number > self.locked_qc.view_number:
-			print(f"updated locked_qc {self.locked_qc}")
-
-		self.locked_qc = msg.justify
+			self.locked_qc = msg.justify
+		
 		vote_msg = Message(
 			Message_types.COMMIT_VOTE,
 			self.current_view,
@@ -261,104 +283,127 @@ class Replica:
 			None,
 			self.replica_id
 		)
-		return vote_msg
-	
-	# DECIDE - LEADER
-	def collect_commit_votes(self, vote_msg):
-		if not matching_msg(vote_msg, Message_types.COMMIT_VOTE, self.current_view):
-			return None
-		elif vote_msg.view_number not in self.commit_votes:
-			self.commit_votes[vote_msg.view_number] = [vote_msg]
-		else:
-			self.commit_votes[vote_msg.view_number].append(vote_msg) 
 		
-		if len(self.commit_votes[vote_msg.view_number]) == QUORUM:
+		leader_id = self.get_leader(self.current_view)
+		await self.send(leader_id, vote_msg)
+
+	# DECIDE - leader
+	async def handle_commit_vote(self, msg):
+		if not self.is_leader or not matching_msg(msg, Message_types.COMMIT_VOTE, self.current_view):
+			return
+		
+		if msg.view_number not in self.commit_votes:
+			self.commit_votes[msg.view_number] = []
+		
+		self.commit_votes[msg.view_number].append(msg)
+		
+		if len(self.commit_votes[msg.view_number]) == QUORUM:
 			qc = QC(
 				Message_types.COMMIT,
 				self.current_view,
-				vote_msg.block
+				msg.block
 			)
-			print(f"leader formed commit QC {qc}")
-			for m in self.commit_votes[vote_msg.view_number]:
-				qc.voters.append(m.partial_sig)
+			for vote in self.commit_votes[msg.view_number]:
+				qc.voters.append(vote.partial_sig)
+			
+			self.trace(f"Leader formed {qc}")
+			
 			decide_msg = Message(
 				Message_types.DECIDE,
 				self.current_view,
 				None,
 				qc
-			)	
-			return decide_msg
-		return None
+			)
+			await self.broadcast(decide_msg)
+
+	# DECIDE - replica
+	async def handle_decide(self, msg):
+		if not matching_qc(msg.justify, Message_types.COMMIT, self.current_view):
+			return
+		
+		self.trace(f"EXECUTING {msg.justify.block.cmds}")
+		self.log.append(msg.justify.block)
+		
+		await asyncio.sleep(0.1)
+		await self.start_new_view(self.current_view + 1)
+
+	async def message_handler(self):
+		while self.running:
+			try:
+				msg = await asyncio.wait_for(self.inbox.get(), timeout=1.0)
+				
+				match msg.msg_type:
+					case Message_types.NEW_VIEW:
+						await self.handle_new_view(msg)
+					case Message_types.PREPARE:
+						await self.handle_prepare(msg)
+					case Message_types.PREPARE_VOTE:
+						await self.handle_prepare_vote(msg)
+					case Message_types.PRECOMMIT:
+						await self.handle_precommit(msg)
+					case Message_types.PRECOMMIT_VOTE:
+						await self.handle_precommit_vote(msg)
+					case Message_types.COMMIT:
+						await self.handle_commit(msg)
+					case Message_types.COMMIT_VOTE:
+						await self.handle_commit_vote(msg)
+					case Message_types.DECIDE:
+						await self.handle_decide(msg)
+					
+			except asyncio.TimeoutError:
+				continue
+
+	async def run(self):
+		await self.start_new_view(1)
+		await self.message_handler()
+
+
+class Network:
+	def __init__(self, delay_ms=10):
+		self.replicas: Dict[int, Replica] = {}
+		self.delay_ms = delay_ms
 	
-	# DECIDE - REPLICA
-	def examine_decision(self, decide_msg):
-		if not matching_qc(decide_msg.justify, Message_types.COMMIT, self.current_view):
-			return None
-		print(f"executing {decide_msg.justify.block.cmds}")
-		self.log.append(decide_msg.justify.block)
-
-	def __str__(self):
-		ret = f"replica_id:{self.replica_id} on view:{self.current_view}"
-		return ret
-
-def simulate(replicas, view):
-	leader = replicas[view % N]
-
-	new_view_messages = []
-	for r in replicas:
-		new_view_messages.append(r.start_new_view(view)) 
-
-	proposal_msg = None
-	for m in new_view_messages:
-		proposal_msg = leader.collect_new_view(m)
-		if proposal_msg is not None:
-			break
-	if proposal_msg is None:
-		print("not able to reach prepare phase")
-		return
-	prepare_votes = []
-	for r in replicas:
-		prepare_votes.append(r.examine_prepare_proposal(proposal_msg))
-
-	precommit_msg = None
-	for m in prepare_votes:
-		precommit_msg = leader.collect_prepare_votes(m)
-		if precommit_msg is not None:
-			break
+	def register_replica(self, replica: Replica):
+		self.replicas[replica.replica_id] = replica
 	
-	precommit_votes = []	
-	for r in replicas:
-		precommit_votes.append(r.examine_precommit(precommit_msg))
+	async def send(self, recipient_id: int, msg: Message):
+		await asyncio.sleep(self.delay_ms / 1000.0)
+		if recipient_id in self.replicas:
+			await self.replicas[recipient_id].inbox.put(msg)
 	
-	commit_msg = None
-	for m in precommit_votes:
-		commit_msg = leader.collect_precommit_votes(m)
-		if commit_msg is not None:
-			break	
+	async def broadcast(self, msg: Message):
+		tasks = []
+		for replica_id in self.replicas:
+			tasks.append(self.send(replica_id, msg))
+		await asyncio.gather(*tasks)
 
-	commit_votes = []
-	for r in replicas:
-		commit_votes.append(r.examine_commit(commit_msg))
+
+async def main():
+	network = Network(delay_ms=10)
 	
-	decide_msg = None	
-	for m in commit_votes:
-		decide_msg = leader.collect_commit_votes(m)
-		if decide_msg is not None:
-			break	
-
-	for r in replicas:
-		r.examine_decision(decide_msg)
-
+	replicas = []
+	for i in range(N):
+		replica = Replica(i, network)
+		network.register_replica(replica)
+		replicas.append(replica)
+	
+	tasks = [replica.run() for replica in replicas]
+	
+	try:
+		# run for 5 secs
+		await asyncio.wait_for(
+			asyncio.gather(*tasks),
+			timeout=5.0
+		)
+	except asyncio.TimeoutError:
+		
+		for replica in replicas:
+			replica.running = False
+		
+		for replica in replicas:
+			print(f"Replica {replica.replica_id}: Log length={len(replica.log)}, "
+			      f"Locked view={replica.locked_qc.view_number}")
 
 
 if __name__ == "__main__":
-	replicas = [Replica(i) for i in range(N)] 
-	for r in replicas:
-		r.replicas = replicas
-
-	for view in range(1, 4):
-		simulate(replicas, view)
-
-	for r in replicas:
-		print(r.log)
-		print(r.locked_qc)
+	asyncio.run(main())
