@@ -463,8 +463,7 @@ class Replica:
 		await self.start_new_view(1)
 		await self.message_handler()
 
-
-async def main():
+async def simulation():
 	address_book = {
 		0: ('127.0.0.1', 50000),
 		1: ('127.0.0.1', 50001),
@@ -502,6 +501,8 @@ async def main():
 			      f"locked view={replica.locked_qc.view_number}")
 			await replica.network.stop_server()
 
+async def main():
+	await simulation()
 
 if __name__ == "__main__":
 	asyncio.run(main())
