@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import pickle
 from enum import Enum
 from typing import Optional, Dict, List
 
@@ -81,7 +82,6 @@ class Replica:
 		self.current_view = 0
 		self.log = [GENESIS_BLOCK]
 		
-		self.inbox = asyncio.Queue()
 		
 		self.new_view_msgs = {}
 		self.prepare_votes = {}
@@ -333,7 +333,7 @@ class Replica:
 	async def message_handler(self):
 		while self.running:
 			try:
-				msg = await asyncio.wait_for(self.inbox.get(), timeout=1.0)
+				msg = await asyncio.wait_for(self.network.inbox.get(), timeout=1.0)
 				
 				match msg.msg_type:
 					case Message_types.NEW_VIEW:
@@ -357,55 +357,100 @@ class Replica:
 				continue
 
 	async def run(self):
+		await self.network.start_server()
+		await asyncio.sleep(1)
 		await self.start_new_view(1)
 		await self.message_handler()
 
+
 # replica's way of talking with the world
 class Network:
-	def __init__(self, host='localhost', port=50000):
-		self.server = await asyncio.start_server(recv, host, port)
-		# i need some structure that knows the replica id and address
+	def __init__(self, replica_id, host='127.0.0.1', port=50000):
+		# the id of the replica who uses the object
+		self.replica_id = replica_id
+		self.inbox = asyncio.Queue()
 		self.address_book = {} # replica_id -> (host: string, port: int)
 		self.conns = {} # replica_id -> (reader, writer)
-		
-	def register_replica(self, replica: Replica):
-		self.replicas[replica.replica_id] = replica
-
+		self.server = None
+		self.host = host
+		self.port = port
+	
+	async def start_server(self):
+		self.server = await asyncio.start_server(
+			self.recv,
+			self.host,
+			self.port
+		)
+	
 	async def connect(self, replica_id):
-		if replica_id in self.conns and replica_id not in self.address_book:
+		if replica_id in self.conns:
+			return True
+
+		if replica_id not in self.address_book:
+			return False
+		
+		for attempt in range(3):
+			try:
+				host, port = self.address_book[replica_id]
+				self.conns[replica_id] = await asyncio.open_connection(host, port)
+				return True
+			except ConnectionRefusedError:
+				await asyncio.sleep(0.2)
+		return False
+
+	async def recv(self, reader, writer):
+		try:
+			while True:
+				# first 32 bits of message are the byte count
+				msg_byte_count = await reader.readexactly(4)
+				msg_byte_count = int.from_bytes(msg_byte_count, 'big')				
+
+				packet = await reader.read(msg_byte_count)
+				if not packet:
+					continue
+				msg = pickle.loads(packet)
+				await self.inbox.put(msg)
+		except Exception as e:
+			print(f"Network error! {e}")
+			writer.close()
+			await writer.wait_closed()
+	
+	async def send(self, recipient_id, msg):
+		if recipient_id == self.replica_id:
+			await self.inbox.put(msg)
 			return
 
-		host, port = self.address_book[replica_id]
-		self.conns[replica_id] = asyncio.open_connection(host, port)
-		pass
+		if not await self.connect(recipient_id):
+			return
 
-	async def recv(self):
-		while True:
-			packet_bytes = await reader.readexactly(4)
-			
-			packet = await reader.read(4096)
-			if not packet:
-				continue
-			msg = pickle.loads(packet)
-			print(msg)
-	
-	async def send(self, recipient_id: int, msg: Message):
-		pass	
+		_, writer = self.conns[recipient_id]
+		
+		packet = pickle.dumps(msg)
+		msg_byte_count = len(packet)
+
+		writer.write(msg_byte_count.to_bytes(4, 'big'))
+		writer.write(packet)
+		await writer.drain()
 
 	async def broadcast(self, msg: Message):
 		tasks = []
-		for replica_id in self.replicas:
+		for replica_id in self.address_book:
 			tasks.append(self.send(replica_id, msg))
 		await asyncio.gather(*tasks)
 
 
 async def main():
-	network = Network(delay_ms=10)
-	
+	address_book = {
+		0: ('127.0.0.1', 50000),
+		1: ('127.0.0.1', 50001),
+		2: ('127.0.0.1', 50002),
+		3: ('127.0.0.1', 50003)
+	}	
 	replicas = []
 	for i in range(N):
+		network = Network(i, '127.0.0.1', 50000+i)
+		network.address_book = address_book
 		replica = Replica(i, network)
-		network.register_replica(replica)
 		replicas.append(replica)
 	
 	tasks = [replica.run() for replica in replicas]
@@ -414,7 +459,7 @@ async def main():
 		# run for 5 secs
 		await asyncio.wait_for(
 			asyncio.gather(*tasks),
-			timeout=5.0
+			timeout=10.0
 		)
 	except asyncio.TimeoutError:
 		
