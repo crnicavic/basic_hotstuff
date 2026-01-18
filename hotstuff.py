@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import pickle
+import random
 from enum import Enum
 from typing import Optional, Dict, List
 
@@ -18,6 +19,15 @@ class Message_types(Enum):
 	COMMIT = 5421315
 	COMMIT_VOTE = 5421316
 	DECIDE = 5421317
+
+	def __str__(self):
+		return self.name
+
+class Fault_types(Enum):
+	HONEST = 1315420
+	CRASH = 1315421
+	SILENT = 1315242
+	MALICIOUS = 1315423
 
 	def __str__(self):
 		return self.name
@@ -86,10 +96,8 @@ class Network:
 		self.server = None
 		self.host = host
 		self.port = port
-		self.running = False
 	
 	async def start_server(self):
-		self.running = True
 		self.server = await asyncio.start_server(
 			self.recv,
 			self.host,
@@ -114,7 +122,7 @@ class Network:
 
 	async def recv(self, reader, writer):
 		try:
-			while self.running:
+			while True:
 				# first 32 bits of message are the byte count
 				msg_byte_count = await reader.readexactly(4)
 				msg_byte_count = int.from_bytes(msg_byte_count, 'big')				
@@ -156,7 +164,6 @@ class Network:
 		await asyncio.gather(*tasks)
 
 	async def stop_server(self):
-		self.running = False
 		self.server.close()
 		for replica_id in self.conns:
 			_, writer = self.conns[replica_id]
@@ -164,7 +171,7 @@ class Network:
 			await writer.wait_closed()
 
 class Replica:
-	def __init__(self, replica_id, network):
+	def __init__(self, replica_id, network, fault_type=Fault_types.HONEST):
 		self.replica_id = replica_id
 		self.network = network
 		self.current_view = 0
@@ -181,8 +188,12 @@ class Replica:
 		self.is_leader = False
 		self.running = True
 
+		self.fault_type = fault_type
+		if fault_type == Fault_types.CRASH:
+			self.crash_view = 10
+
 	def trace(self, string):
-		print(f"[R{self.replica_id}] {string}")
+		print(f"[R{self.replica_id}][{self.fault_type}] {string}")
 
 	def extends(self, new_block, from_block):
 		current_block = new_block
@@ -419,6 +430,9 @@ class Replica:
 
 	async def message_handler(self):
 		while self.running:
+			if self.fault_type == Fault_types.CRASH and self.current_view == self.crash_view:
+				self.trace(f"REPLICA CRASHED AT {self.current_view}")
+				break
 			try:
 				msg = await asyncio.wait_for(self.network.inbox.get(), timeout=1.0)
 				
@@ -457,11 +471,17 @@ async def main():
 		2: ('127.0.0.1', 50002),
 		3: ('127.0.0.1', 50003)
 	}	
+	replica_types = {
+		0: Fault_types.CRASH,
+		1: Fault_types.HONEST,
+		2: Fault_types.HONEST,
+		3: Fault_types.HONEST
+	}
 	replicas = []
 	for i in range(N):
 		network = Network(i, '127.0.0.1', 50000+i)
 		network.address_book = address_book
-		replica = Replica(i, network)
+		replica = Replica(i, network, replica_types[i])
 		replicas.append(replica)
 	
 	tasks = [replica.run() for replica in replicas]
