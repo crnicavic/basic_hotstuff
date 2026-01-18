@@ -75,13 +75,100 @@ class Message:
 def matching_msg(m, t, v):
 	return m.msg_type == t and m.view_number == v
 
+# replica's way of talking with the world
+class Network:
+	def __init__(self, replica_id, host='127.0.0.1', port=50000):
+		# the id of the replica who uses the object
+		self.replica_id = replica_id
+		self.inbox = asyncio.Queue()
+		self.address_book = {} # replica_id -> (host: string, port: int)
+		self.conns = {} # replica_id -> (reader, writer)
+		self.server = None
+		self.host = host
+		self.port = port
+		self.running = False
+	
+	async def start_server(self):
+		self.running = True
+		self.server = await asyncio.start_server(
+			self.recv,
+			self.host,
+			self.port
+		)
+	
+	async def connect(self, replica_id):
+		if replica_id in self.conns:
+			return True
+
+		if replica_id not in self.address_book:
+			return False
+		
+		for attempt in range(3):
+			try:
+				host, port = self.address_book[replica_id]
+				self.conns[replica_id] = await asyncio.open_connection(host, port)
+				return True
+			except ConnectionRefusedError:
+				await asyncio.sleep(0.2)
+		return False
+
+	async def recv(self, reader, writer):
+		try:
+			while self.running:
+				# first 32 bits of message are the byte count
+				msg_byte_count = await reader.readexactly(4)
+				msg_byte_count = int.from_bytes(msg_byte_count, 'big')				
+
+				packet = await reader.read(msg_byte_count)
+				if not packet:
+					continue
+				msg = pickle.loads(packet)
+				await self.inbox.put(msg)
+		except asyncio.IncompleteReadError:
+			pass		
+		except Exception as e:
+			print(f"Network error! {e}")
+		finally:
+			writer.close()
+			await writer.wait_closed()
+	
+	async def send(self, recipient_id, msg):
+		if recipient_id == self.replica_id:
+			await self.inbox.put(msg)
+			return
+
+		if not await self.connect(recipient_id):
+			return
+
+		_, writer = self.conns[recipient_id]
+		
+		packet = pickle.dumps(msg)
+		msg_byte_count = len(packet)
+
+		writer.write(msg_byte_count.to_bytes(4, 'big'))
+		writer.write(packet)
+		await writer.drain()
+
+	async def broadcast(self, msg: Message):
+		tasks = []
+		for replica_id in self.address_book:
+			tasks.append(self.send(replica_id, msg))
+		await asyncio.gather(*tasks)
+
+	async def stop_server(self):
+		self.running = False
+		self.server.close()
+		for replica_id in self.conns:
+			_, writer = self.conns[replica_id]
+			writer.close()
+			await writer.wait_closed()
+
 class Replica:
 	def __init__(self, replica_id, network):
 		self.replica_id = replica_id
 		self.network = network
 		self.current_view = 0
 		self.log = [GENESIS_BLOCK]
-		
 		
 		self.new_view_msgs = {}
 		self.prepare_votes = {}
@@ -363,82 +450,6 @@ class Replica:
 		await self.message_handler()
 
 
-# replica's way of talking with the world
-class Network:
-	def __init__(self, replica_id, host='127.0.0.1', port=50000):
-		# the id of the replica who uses the object
-		self.replica_id = replica_id
-		self.inbox = asyncio.Queue()
-		self.address_book = {} # replica_id -> (host: string, port: int)
-		self.conns = {} # replica_id -> (reader, writer)
-		self.server = None
-		self.host = host
-		self.port = port
-	
-	async def start_server(self):
-		self.server = await asyncio.start_server(
-			self.recv,
-			self.host,
-			self.port
-		)
-	
-	async def connect(self, replica_id):
-		if replica_id in self.conns:
-			return True
-
-		if replica_id not in self.address_book:
-			return False
-		
-		for attempt in range(3):
-			try:
-				host, port = self.address_book[replica_id]
-				self.conns[replica_id] = await asyncio.open_connection(host, port)
-				return True
-			except ConnectionRefusedError:
-				await asyncio.sleep(0.2)
-		return False
-
-	async def recv(self, reader, writer):
-		try:
-			while True:
-				# first 32 bits of message are the byte count
-				msg_byte_count = await reader.readexactly(4)
-				msg_byte_count = int.from_bytes(msg_byte_count, 'big')				
-
-				packet = await reader.read(msg_byte_count)
-				if not packet:
-					continue
-				msg = pickle.loads(packet)
-				await self.inbox.put(msg)
-		except Exception as e:
-			print(f"Network error! {e}")
-			writer.close()
-			await writer.wait_closed()
-	
-	async def send(self, recipient_id, msg):
-		if recipient_id == self.replica_id:
-			await self.inbox.put(msg)
-			return
-
-		if not await self.connect(recipient_id):
-			return
-
-		_, writer = self.conns[recipient_id]
-		
-		packet = pickle.dumps(msg)
-		msg_byte_count = len(packet)
-
-		writer.write(msg_byte_count.to_bytes(4, 'big'))
-		writer.write(packet)
-		await writer.drain()
-
-	async def broadcast(self, msg: Message):
-		tasks = []
-		for replica_id in self.address_book:
-			tasks.append(self.send(replica_id, msg))
-		await asyncio.gather(*tasks)
-
-
 async def main():
 	address_book = {
 		0: ('127.0.0.1', 50000),
@@ -459,7 +470,7 @@ async def main():
 		# run for 5 secs
 		await asyncio.wait_for(
 			asyncio.gather(*tasks),
-			timeout=10.0
+			timeout=5.0
 		)
 	except asyncio.TimeoutError:
 		
@@ -467,8 +478,9 @@ async def main():
 			replica.running = False
 		
 		for replica in replicas:
-			print(f"Replica {replica.replica_id}: Log length={len(replica.log)}, "
-			      f"Locked view={replica.locked_qc.view_number}")
+			print(f"Replica {replica.replica_id}: log length={len(replica.log)}, "
+			      f"locked view={replica.locked_qc.view_number}")
+			await replica.network.stop_server()
 
 
 if __name__ == "__main__":
