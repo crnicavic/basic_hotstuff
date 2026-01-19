@@ -25,9 +25,9 @@ class Message_types(Enum):
 
 class Fault_types(Enum):
 	HONEST = 1315420
-	CRASH = 1315421
-	SILENT = 1315242
-	MALICIOUS = 1315423
+	CRASH = 1315421		# once self.current_view reaches x, stop running
+	SILENT = 1315242	# each send has a 70% of "failing"
+	MALICIOUS = 1315423	# propose different blocks to different replicas
 
 	def __str__(self):
 		return self.name
@@ -191,6 +191,8 @@ class Replica:
 		self.fault_type = fault_type
 		if fault_type == Fault_types.CRASH:
 			self.crash_view = 10
+		elif fault_type == Fault_types.SILENT:
+			self.drop_prob = 0.7
 
 	def trace(self, string):
 		print(f"[R{self.replica_id}][{self.fault_type}] {string}")
@@ -211,10 +213,16 @@ class Replica:
 		return view % N
 
 	async def send(self, recipient_id, msg):
+		if self.fault_type == Fault_types.SILENT:
+			if random.random() < self.drop_prob:
+				return
 		msg.sender = self.replica_id
 		await self.network.send(recipient_id, msg)
 
 	async def broadcast(self, msg):
+		if self.fault_type == Fault_types.SILENT:
+			if random.random() < self.drop_prob:
+				return
 		msg.sender = self.replica_id
 		await self.network.broadcast(msg)
 
@@ -432,7 +440,7 @@ class Replica:
 		while self.running:
 			if self.fault_type == Fault_types.CRASH and self.current_view == self.crash_view:
 				self.trace(f"REPLICA CRASHED AT {self.current_view}")
-				break
+				self.running = False
 			try:
 				msg = await asyncio.wait_for(self.network.inbox.get(), timeout=1.0)
 				
