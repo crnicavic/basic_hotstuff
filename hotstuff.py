@@ -170,6 +170,38 @@ class Network:
 			writer.close()
 			await writer.wait_closed()
 
+class Pacemaker:
+	def __init__(self, timeout, replica_callback):
+		self.timeout = timeout
+		self.current_view = 0
+		self.task = None
+		self.timer_running = False
+		self.replica_callback = replica_callback
+
+	# when no progress is made
+	async def on_timeout(self):
+		self.timer_running = True
+		try:
+			await asyncio.sleep(self.timeout)
+			# force replica to move to next view
+			print("TIMEOUT")
+			self.timer_running = False
+			self.current_view += 1
+			await self.replica_callback(self.current_view)
+		except asyncio.CancelledError:
+			self.timer_running = False
+
+	# call when moving on to next view
+	async def new_view(self, view):	
+		self.current_view = view
+		if self.task is not None and self.timer_running:
+			self.task.cancel()
+		self.task = asyncio.create_task(self.on_timeout())
+
+	def stop(self):
+		if self.task is not None and self.timer_running:
+			self.task.cancel()
+
 class Replica:
 	def __init__(self, replica_id, network, fault_type=Fault_types.HONEST):
 		self.replica_id = replica_id
@@ -187,6 +219,8 @@ class Replica:
 		
 		self.is_leader = False
 		self.running = True
+
+		self.pacemaker = Pacemaker(2.0, self.start_new_view)
 
 		self.fault_type = fault_type
 		if fault_type == Fault_types.CRASH:
@@ -232,6 +266,7 @@ class Replica:
 			return
 		
 		self.current_view = new_view
+		await self.pacemaker.new_view(new_view)
 		self.is_leader = (self.get_leader(new_view) == self.replica_id)
 		
 		self.trace(f"Entering view {new_view} {'(LEADER)' if self.is_leader else ''}")
@@ -440,6 +475,7 @@ class Replica:
 		while self.running:
 			if self.fault_type == Fault_types.CRASH and self.current_view == self.crash_view:
 				self.trace(f"REPLICA CRASHED AT {self.current_view}")
+				self.pacemaker.stop()
 				self.running = False
 			try:
 				msg = await asyncio.wait_for(self.network.inbox.get(), timeout=1.0)
@@ -497,7 +533,7 @@ async def simulation():
 		# run for 5 secs
 		await asyncio.wait_for(
 			asyncio.gather(*tasks),
-			timeout=5.0
+			timeout=20.0
 		)
 	except asyncio.TimeoutError:
 		
