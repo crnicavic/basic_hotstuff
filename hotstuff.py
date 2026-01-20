@@ -70,6 +70,26 @@ def matching_qc(qc, t, v):
 
 GENESIS_QC = QC(Message_types.PREPARE, 0, GENESIS_BLOCK)
 
+class Partial_sig:
+	# when sending message msg.sender is not available so this is a hack
+	def __init__(self, msg, signer_id):
+		h = hashlib.sha256()
+		h.update(str(msg.view_number).encode())
+		h.update(str(msg.type).encode())
+		h.update(str(msg.block.hash).encode())
+		h.update(str(signer_id).encode())
+		self.hash = h
+		self.signer_id = sender_id
+
+	# dont need that field here
+	def verify(self, msg):
+		h = hashlib.sha256()
+		h.update(str(msg.view_number).encode())
+		h.update(str(msg.type).encode())
+		h.update(str(msg.block.hash).encode())
+		h.update(str(msg.sender).encode())
+		return self.hash == h 
+
 class Message:
 	def __init__(self, msg_type, view_number, block, qc, sig=None, sender=None):
 		self.msg_type = msg_type
@@ -178,6 +198,9 @@ class Pacemaker:
 		self.timer_running = False
 		self.replica_callback = replica_callback
 
+	def get_leader(self, view):
+		return view % N
+
 	# when no progress is made
 	async def on_timeout(self):
 		self.timer_running = True
@@ -192,7 +215,7 @@ class Pacemaker:
 			self.timer_running = False
 
 	# call when moving on to next view
-	async def new_view(self, view):	
+	def new_view(self, view):	
 		self.current_view = view
 		if self.task is not None and self.timer_running:
 			self.task.cancel()
@@ -243,8 +266,6 @@ class Replica:
 		return (self.extends(block, self.locked_qc.block) or 
 		        (qc.view_number > self.locked_qc.view_number))
 
-	def get_leader(self, view):
-		return view % N
 
 	async def send(self, recipient_id, msg):
 		if self.fault_type == Fault_types.SILENT:
@@ -266,12 +287,12 @@ class Replica:
 			return
 		
 		self.current_view = new_view
-		await self.pacemaker.new_view(new_view)
-		self.is_leader = (self.get_leader(new_view) == self.replica_id)
+		self.pacemaker.new_view(new_view)
+		leader_id = self.pacemaker.get_leader(new_view)
+		self.is_leader = (leader_id == self.replica_id)
 		
 		self.trace(f"Entering view {new_view} {'(LEADER)' if self.is_leader else ''}")
 		
-		leader_id = self.get_leader(new_view)
 		msg = Message(
 			Message_types.NEW_VIEW,
 			new_view,
@@ -329,7 +350,7 @@ class Replica:
 				self.replica_id
 			)
 			
-			leader_id = self.get_leader(self.current_view)
+			leader_id = self.pacemaker.get_leader(self.current_view)
 			await self.send(leader_id, vote_msg)
 
 	# PRECOMMIT - leader
@@ -379,7 +400,7 @@ class Replica:
 			self.replica_id
 		)
 		
-		leader_id = self.get_leader(self.current_view)
+		leader_id = self.pacemaker.get_leader(self.current_view)
 		await self.send(leader_id, vote_msg)
 
 	# COMMIT - leader
@@ -427,7 +448,7 @@ class Replica:
 			self.replica_id
 		)
 		
-		leader_id = self.get_leader(self.current_view)
+		leader_id = self.pacemaker.get_leader(self.current_view)
 		await self.send(leader_id, vote_msg)
 
 	# DECIDE - leader
