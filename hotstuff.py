@@ -70,25 +70,6 @@ def matching_qc(qc, t, v):
 
 GENESIS_QC = QC(Message_types.PREPARE, 0, GENESIS_BLOCK)
 
-class Partial_sig:
-	# when sending message msg.sender is not available so this is a hack
-	def __init__(self, msg, signer_id):
-		h = hashlib.sha256()
-		h.update(str(msg.view_number).encode())
-		h.update(str(msg.type).encode())
-		h.update(str(msg.block.hash).encode())
-		h.update(str(signer_id).encode())
-		self.hash = h
-		self.signer_id = sender_id
-
-	# dont need that field here
-	def verify(self, msg):
-		h = hashlib.sha256()
-		h.update(str(msg.view_number).encode())
-		h.update(str(msg.type).encode())
-		h.update(str(msg.block.hash).encode())
-		h.update(str(msg.sender).encode())
-		return self.hash == h 
 
 class Message:
 	def __init__(self, msg_type, view_number, block, qc, sig=None, sender=None):
