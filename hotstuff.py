@@ -158,7 +158,7 @@ class Network:
 				msg = pickle.loads(packet)
 				await self.inbox.put(msg)
 		except asyncio.IncompleteReadError:
-			pass		
+			pass
 		except Exception as e:
 			print(f"Network error! {e}")
 		finally:
@@ -235,6 +235,7 @@ class Replica:
 		self.replica_id = replica_id
 		self.network = network
 		self.current_view = 0
+		self.current_proposal = None
 		self.log = [GENESIS_BLOCK]
 		
 		self.new_view_msgs = {}
@@ -346,6 +347,7 @@ class Replica:
 		
 		if self.extends(msg.block, msg.justify.block) and self.safe_block(msg.block, msg.justify):
 			self.trace(f"Voting for {msg.block}")
+			self.current_proposal = msg.block
 
 			partial_sig = Signature.partial_sign(
 				self.current_view,
@@ -372,7 +374,8 @@ class Replica:
 		if msg.view_number not in self.prepare_votes:
 			self.prepare_votes[msg.view_number] = []
 		
-		self.prepare_votes[msg.view_number].append(msg)
+		if msg.block.hash == self.current_proposal.hash:	
+			self.prepare_votes[msg.view_number].append(msg)
 		
 		if len(self.prepare_votes[msg.view_number]) == QUORUM:
 			qc = QC(
@@ -430,7 +433,9 @@ class Replica:
 		if msg.view_number not in self.precommit_votes:
 			self.precommit_votes[msg.view_number] = []
 		
-		self.precommit_votes[msg.view_number].append(msg)
+		#dont count bogus votes	
+		if msg.block.hash == self.current_proposal.hash:
+			self.precommit_votes[msg.view_number].append(msg)
 		
 		if len(self.precommit_votes[msg.view_number]) == QUORUM:
 			qc = QC(
@@ -485,7 +490,8 @@ class Replica:
 		if msg.view_number not in self.commit_votes:
 			self.commit_votes[msg.view_number] = []
 		
-		self.commit_votes[msg.view_number].append(msg)
+		if msg.block.hash == self.current_proposal.hash:
+			self.commit_votes[msg.view_number].append(msg)
 		
 		if len(self.commit_votes[msg.view_number]) == QUORUM:
 			qc = QC(
@@ -564,7 +570,7 @@ async def simulation():
 		3: ('127.0.0.1', 50003)
 	}	
 	replica_types = {
-		0: Fault_types.CRASH,
+		0: Fault_types.HONEST,
 		1: Fault_types.HONEST,
 		2: Fault_types.HONEST,
 		3: Fault_types.HONEST
