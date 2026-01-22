@@ -62,6 +62,7 @@ class Signature:
 		self.total = n
 		self.combined = []
 
+	@staticmethod	
 	def partial_sign(view, msg_type, block_hash):
 		h = hashlib.sha256()
 		h.update(str(view).encode())
@@ -70,20 +71,21 @@ class Signature:
 		return h.hexdigest()
 
 	# placeholder for potential implementation
-	def combine(partial_sig):
+	def combine(self, partial_sig):
 		self.combined.append(partial_sig)
 
-	def verify():
-		Counter(self.combined).keys()
-		Counter(self.combines).values()
-		
+	def verify(self):
+		# if there are enough values that match
+		if max(Counter(self.combined).values()) >= self.threshold:
+			return True
+		return False
 
 class QC:
 	def __init__(self, qc_type, view_number, block):
 		self.qc_type = qc_type
 		self.view_number = view_number
 		self.block = block
-		self.voters = []
+		self.signature = Signature(N, F)
 
 	def __str__(self):
 		return f"QC(type:{self.qc_type}, view:{self.view_number})"
@@ -344,13 +346,19 @@ class Replica:
 		
 		if self.extends(msg.block, msg.justify.block) and self.safe_block(msg.block, msg.justify):
 			self.trace(f"Voting for {msg.block}")
-			
+
+			partial_sig = Signature.partial_sign(
+				self.current_view,
+				Message_types.PREPARE_VOTE,
+				msg.block.hash
+			)
+
 			vote_msg = Message(
 				Message_types.PREPARE_VOTE,
 				self.current_view,
 				msg.block,
 				None,
-				self.replica_id
+				partial_sig
 			)
 			
 			leader_id = self.pacemaker.get_leader(self.current_view)
@@ -373,7 +381,7 @@ class Replica:
 				msg.block
 			)
 			for vote in self.prepare_votes[msg.view_number]:
-				qc.voters.append(vote.partial_sig)
+				qc.signature.combine(vote.partial_sig)
 			
 			self.high_prepare_qc = qc
 			
@@ -391,16 +399,24 @@ class Replica:
 	async def handle_precommit(self, msg):
 		if not matching_qc(msg.justify, Message_types.PREPARE, self.current_view):
 			return
+		if not msg.justify.signature.verify():
+			return
 		
 		if msg.justify.view_number > self.high_prepare_qc.view_number:
 			self.high_prepare_qc = msg.justify
-		
+
+		partial_sig = Signature.partial_sign(
+			self.current_view,
+			Message_types.PRECOMMIT_VOTE,
+			msg.justify.block.hash
+		)
+	
 		vote_msg = Message(
 			Message_types.PRECOMMIT_VOTE,
 			self.current_view,
 			msg.justify.block,
 			None,
-			self.replica_id
+			partial_sig
 		)
 		
 		leader_id = self.pacemaker.get_leader(self.current_view)
@@ -423,7 +439,7 @@ class Replica:
 				msg.block
 			)
 			for vote in self.precommit_votes[msg.view_number]:
-				qc.voters.append(vote.partial_sig)
+				qc.signature.combine(vote.partial_sig)
 			
 			self.trace(f"Leader formed {qc}")
 			
@@ -439,16 +455,23 @@ class Replica:
 	async def handle_commit(self, msg):
 		if not matching_qc(msg.justify, Message_types.PRECOMMIT, self.current_view):
 			return
+		if not msg.justify.signature.verify():
+			return
 		
 		if msg.justify.view_number > self.locked_qc.view_number:
 			self.locked_qc = msg.justify
-		
+	
+		partial_sig = Signature.partial_sign(
+			self.current_view,
+			Message_types.COMMIT_VOTE,
+			msg.justify.block.hash
+		)	
 		vote_msg = Message(
 			Message_types.COMMIT_VOTE,
 			self.current_view,
 			msg.justify.block,
 			None,
-			self.replica_id
+			partial_sig
 		)
 		
 		leader_id = self.pacemaker.get_leader(self.current_view)
@@ -471,7 +494,7 @@ class Replica:
 				msg.block
 			)
 			for vote in self.commit_votes[msg.view_number]:
-				qc.voters.append(vote.partial_sig)
+				qc.signature.combine(vote.partial_sig)
 			
 			self.trace(f"Leader formed {qc}")
 			
@@ -486,6 +509,8 @@ class Replica:
 	# DECIDE - replica
 	async def handle_decide(self, msg):
 		if not matching_qc(msg.justify, Message_types.COMMIT, self.current_view):
+			return
+		if not msg.justify.signature.verify():
 			return
 		
 		self.trace(f"Executing {msg.justify.block.cmds}")
