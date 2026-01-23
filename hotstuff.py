@@ -182,7 +182,7 @@ class Network:
 		writer.write(packet)
 		await writer.drain()
 
-	async def broadcast(self, msg: Message):
+	async def broadcast(self, msg):
 		tasks = []
 		for replica_id in self.address_book:
 			tasks.append(self.send(replica_id, msg))
@@ -629,6 +629,30 @@ class Delayed_network(Network):
 		writer.write(packet)
 		await writer.drain()
 
+class Malicious_replica(Replica):
+	def trace(self, string):
+		print(f"[R{self.replica_id}][MALICIOUS] {string}")
+
+class Malicious_network(Network):
+	async def broadcast(self, msg):
+		tasks = []
+		for replica_id in self.address_book:
+			mal_block = Block(
+					cmds=f"malicious_cmd_for_{replica_id}",
+					parent=msg.justify.block,
+					view=msg.view_number
+			)
+
+			mal_msg = Message(
+					Message_types.PREPARE,
+					msg.view_number,
+					mal_block,
+					msg.justify,
+					sender=msg.sender
+			)
+			tasks.append(self.send(replica_id, mal_msg))
+		await asyncio.gather(*tasks)
+
 async def simulation():
 	address_book = {
 		0: ('127.0.0.1', 50000),
@@ -637,7 +661,7 @@ async def simulation():
 		3: ('127.0.0.1', 50003)
 	}	
 	replica_types = {
-		0: Fault_types.DELAYED,
+		0: Fault_types.MALICIOUS,
 		1: Fault_types.HONEST,
 		2: Fault_types.HONEST,
 		3: Fault_types.HONEST
@@ -657,6 +681,10 @@ async def simulation():
 			network = Delayed_network(i, '127.0.0.1', 50000+i)
 			network.address_book = address_book
 			replica = Delayed_replica(i, network)
+		elif replica_types[i] == Fault_types.MALICIOUS:
+			network = Malicious_network(i, '127.0.0.1', 50000+i)
+			network.address_book = address_book
+			replica = Malicious_replica(i, network)
 		replicas.append(replica)
 	
 	tasks = [replica.run() for replica in replicas]
@@ -665,7 +693,7 @@ async def simulation():
 		# run for 5 secs
 		await asyncio.wait_for(
 			asyncio.gather(*tasks),
-			timeout=20.0
+			timeout=10.0
 		)
 	except asyncio.TimeoutError:
 		
