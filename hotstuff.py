@@ -638,9 +638,9 @@ class Malicious_network(Network):
 		tasks = []
 		for replica_id in self.address_book:
 			mal_block = Block(
-					cmds=f"malicious_cmd_for_{replica_id}",
-					parent=msg.justify.block,
-					view=msg.view_number
+					"malicious_cmd_for_{replica_id}",
+					msg.justify.block,
+					msg.view_number
 			)
 
 			mal_msg = Message(
@@ -648,7 +648,7 @@ class Malicious_network(Network):
 					msg.view_number,
 					mal_block,
 					msg.justify,
-					sender=msg.sender
+					msg.sender
 			)
 			tasks.append(self.send(replica_id, mal_msg))
 		await asyncio.gather(*tasks)
