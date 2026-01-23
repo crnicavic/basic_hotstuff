@@ -27,7 +27,7 @@ class Message_types(Enum):
 class Fault_types(Enum):
 	HONEST = 1315420
 	CRASH = 1315421		# once self.current_view reaches x, stop running
-	SILENT = 1315242	# each send has a 70% of "failing"
+	DELAYED = 1315242	# delays every send by random amount
 	MALICIOUS = 1315423	# propose different blocks to different replicas
 
 	def __str__(self):
@@ -219,19 +219,18 @@ class Pacemaker:
 		except asyncio.CancelledError:
 			self.timer_running = False
 
-	# call when moving on to next view
-	def new_view(self, view):	
-		self.current_view = view
+	def start_timer(self, view=None):	
+		self.current_view = view if view is not None else self.current_view
 		if self.task is not None and self.timer_running:
 			self.task.cancel()
 		self.task = asyncio.create_task(self.on_timeout())
 
-	def stop(self):
+	def stop_timer(self):
 		if self.task is not None and self.timer_running:
 			self.task.cancel()
 
 class Replica:
-	def __init__(self, replica_id, network, fault_type=Fault_types.HONEST):
+	def __init__(self, replica_id, network):
 		self.replica_id = replica_id
 		self.network = network
 		self.current_view = 0
@@ -251,14 +250,8 @@ class Replica:
 
 		self.pacemaker = Pacemaker(2.0, self.start_new_view)
 
-		self.fault_type = fault_type
-		if fault_type == Fault_types.CRASH:
-			self.crash_view = 10
-		elif fault_type == Fault_types.SILENT:
-			self.drop_prob = 0.7
-
 	def trace(self, string):
-		print(f"[R{self.replica_id}][{self.fault_type}] {string}")
+		print(f"[R{self.replica_id}][HONEST] {string}")
 
 	def extends(self, new_block, from_block):
 		current_block = new_block
@@ -274,16 +267,10 @@ class Replica:
 
 
 	async def send(self, recipient_id, msg):
-		if self.fault_type == Fault_types.SILENT:
-			if random.random() < self.drop_prob:
-				return
 		msg.sender = self.replica_id
 		await self.network.send(recipient_id, msg)
 
 	async def broadcast(self, msg):
-		if self.fault_type == Fault_types.SILENT:
-			if random.random() < self.drop_prob:
-				return
 		msg.sender = self.replica_id
 		await self.network.broadcast(msg)
 
@@ -293,7 +280,7 @@ class Replica:
 			return
 		
 		self.current_view = new_view
-		self.pacemaker.new_view(new_view)
+		self.pacemaker.start_timer(new_view)
 		leader_id = self.pacemaker.get_leader(new_view)
 		self.is_leader = (leader_id == self.replica_id)
 		
@@ -346,6 +333,7 @@ class Replica:
 			return
 		
 		if self.extends(msg.block, msg.justify.block) and self.safe_block(msg.block, msg.justify):
+			self.pacemaker.stop_timer()
 			self.trace(f"Voting for {msg.block}")
 			self.current_proposal = msg.block
 
@@ -364,6 +352,7 @@ class Replica:
 			)
 			
 			leader_id = self.pacemaker.get_leader(self.current_view)
+			self.pacemaker.start_timer()
 			await self.send(leader_id, vote_msg)
 
 	# PRECOMMIT - leader
@@ -407,7 +396,7 @@ class Replica:
 		
 		if msg.justify.view_number > self.high_prepare_qc.view_number:
 			self.high_prepare_qc = msg.justify
-
+		self.pacemaker.stop_timer()
 		partial_sig = Signature.partial_sign(
 			self.current_view,
 			Message_types.PRECOMMIT_VOTE,
@@ -423,6 +412,7 @@ class Replica:
 		)
 		
 		leader_id = self.pacemaker.get_leader(self.current_view)
+		self.pacemaker.start_timer()
 		await self.send(leader_id, vote_msg)
 
 	# COMMIT - leader
@@ -465,7 +455,8 @@ class Replica:
 		
 		if msg.justify.view_number > self.locked_qc.view_number:
 			self.locked_qc = msg.justify
-	
+
+		self.pacemaker.stop_timer()	
 		partial_sig = Signature.partial_sign(
 			self.current_view,
 			Message_types.COMMIT_VOTE,
@@ -480,6 +471,7 @@ class Replica:
 		)
 		
 		leader_id = self.pacemaker.get_leader(self.current_view)
+		self.pacemaker.start_timer()
 		await self.send(leader_id, vote_msg)
 
 	# DECIDE - leader
@@ -528,10 +520,6 @@ class Replica:
 
 	async def message_handler(self):
 		while self.running:
-			if self.fault_type == Fault_types.CRASH and self.current_view == self.crash_view:
-				self.trace(f"REPLICA CRASHED AT {self.current_view}")
-				self.pacemaker.stop()
-				self.running = False
 			try:
 				msg = await asyncio.wait_for(self.network.inbox.get(), timeout=1.0)
 				
@@ -562,6 +550,85 @@ class Replica:
 		await self.start_new_view(1)
 		await self.message_handler()
 
+class Crash_replica(Replica):
+	def __init__(self, replica_id, network, crash_view):
+		self.replica_id = replica_id
+		self.network = network
+		self.current_view = 0
+		self.current_proposal = None
+		self.log = [GENESIS_BLOCK]
+		
+		self.new_view_msgs = {}
+		self.prepare_votes = {}
+		self.precommit_votes = {}
+		self.commit_votes = {}
+		
+		self.high_prepare_qc = GENESIS_QC
+		self.locked_qc = GENESIS_QC
+		
+		self.is_leader = False
+		self.running = True
+
+		self.pacemaker = Pacemaker(2.0, self.start_new_view)
+
+		self.crash_view = crash_view
+
+	def trace(self, string):
+		print(f"[R{self.replica_id}][CRASH] {string}")
+
+	async def message_handler(self):
+		while self.running:
+			if self.current_view == self.crash_view:
+				self.trace(f"REPLICA CRASHED AT {self.current_view}")
+				self.pacemaker.stop_timer()
+				self.running = False
+			try:
+				msg = await asyncio.wait_for(self.network.inbox.get(), timeout=1.0)
+				
+				match msg.msg_type:
+					case Message_types.NEW_VIEW:
+						await self.handle_new_view(msg)
+					case Message_types.PREPARE:
+						await self.handle_prepare(msg)
+					case Message_types.PREPARE_VOTE:
+						await self.handle_prepare_vote(msg)
+					case Message_types.PRECOMMIT:
+						await self.handle_precommit(msg)
+					case Message_types.PRECOMMIT_VOTE:
+						await self.handle_precommit_vote(msg)
+					case Message_types.COMMIT:
+						await self.handle_commit(msg)
+					case Message_types.COMMIT_VOTE:
+						await self.handle_commit_vote(msg)
+					case Message_types.DECIDE:
+						await self.handle_decide(msg)
+					
+			except asyncio.TimeoutError:
+				continue
+
+class Delayed_replica(Replica):
+	def trace(self, string):
+		print(f"[R{self.replica_id}][DELAYED] {string}")
+
+class Delayed_network(Network):
+	async def send(self, recipient_id, msg):
+		if recipient_id == self.replica_id:
+			await self.inbox.put(msg)
+			return
+
+		if not await self.connect(recipient_id):
+			return
+
+		_, writer = self.conns[recipient_id]
+		
+		packet = pickle.dumps(msg)
+		msg_byte_count = len(packet)
+
+		await asyncio.sleep(0.1)
+		writer.write(msg_byte_count.to_bytes(4, 'big'))
+		writer.write(packet)
+		await writer.drain()
+
 async def simulation():
 	address_book = {
 		0: ('127.0.0.1', 50000),
@@ -570,16 +637,26 @@ async def simulation():
 		3: ('127.0.0.1', 50003)
 	}	
 	replica_types = {
-		0: Fault_types.HONEST,
+		0: Fault_types.DELAYED,
 		1: Fault_types.HONEST,
 		2: Fault_types.HONEST,
 		3: Fault_types.HONEST
 	}
 	replicas = []
 	for i in range(N):
-		network = Network(i, '127.0.0.1', 50000+i)
-		network.address_book = address_book
-		replica = Replica(i, network, replica_types[i])
+		crash_view = 10
+		if replica_types[i] == Fault_types.HONEST:
+			network = Network(i, '127.0.0.1', 50000+i)
+			network.address_book = address_book
+			replica = Replica(i, network)
+		elif replica_types[i] == Fault_types.CRASH:
+			network = Network(i, '127.0.0.1', 50000+i)
+			network.address_book = address_book
+			replica = Crash_replica(i, network, crash_view)
+		elif replica_types[i] == Fault_types.DELAYED:
+			network = Delayed_network(i, '127.0.0.1', 50000+i)
+			network.address_book = address_book
+			replica = Delayed_replica(i, network)
 		replicas.append(replica)
 	
 	tasks = [replica.run() for replica in replicas]
