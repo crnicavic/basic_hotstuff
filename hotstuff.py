@@ -10,6 +10,19 @@ N = 4
 F = 1
 QUORUM = 2*F+1
 
+class Command:
+	def __init__(self, op, args, client_id):
+		self.op = op
+		self.args = args
+		self.client_id = client_id
+
+	def calculate_hash(self):
+		h = hashlib.sha256()
+		h.update(str(self.op).encode())
+		h.update(str(self.args).encode())
+		h.update(str(self.client_id).encode())
+		return h
+
 # some numbers that aren't 0, 1 and so forth
 class Message_types(Enum):
 	NEW_VIEW = 5421310
