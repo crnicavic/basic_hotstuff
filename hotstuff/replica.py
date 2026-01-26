@@ -102,6 +102,12 @@ class Replica:
 		)
 		await self.send(leader_id, msg)
 
+	async def handle_client_req(self, msg):
+		if not msg.msg_type == Message_types.CLIENT_REQ:
+			return
+
+		self.network.client_respond(msg, msg.client_id)
+
 	# PREPARE - leader
 	async def handle_new_view(self, msg):
 		if not self.is_leader or not matching_msg(msg, Message_types.NEW_VIEW, self.current_view):
@@ -347,6 +353,8 @@ class Replica:
 						await self.handle_commit_vote(msg)
 					case Message_types.DECIDE:
 						await self.handle_decide(msg)
+					case Message_types.CLIENT_REQ:
+						await self.handle_client_req(msg)
 					
 			except asyncio.TimeoutError:
 				continue

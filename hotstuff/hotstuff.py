@@ -28,7 +28,30 @@ class Client:
 			except ConnectionRefusedError:
 				await asyncio.sleep(0.2)
 		return False
+
+	def send_request(self, recipient_id, msg):		
+		if not await self.connect(recipient_id):
+			return
 		
+		reader, writer = self.replica_conns[recipient_id]
+		
+		packet = pickle.dumps(msg)
+		msg_byte_count = len(packet)
+
+		writer.write(msg_byte_count.to_bytes(4, 'big'))
+		writer.write(packet)
+		await writer.drain()
+
+		# first 32 bits of message are the byte count
+		msg_byte_count = await reader.readexactly(4)
+		msg_byte_count = int.from_bytes(msg_byte_count, 'big')				
+
+		packet = await reader.read(msg_byte_count)
+		if not packet:
+			continue
+
+		msg = pickle.loads(packet)
+		print(msg)
 
 async def simulation():
 	replica_addresses = {

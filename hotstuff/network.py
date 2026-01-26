@@ -10,6 +10,7 @@ class Network:
 		self.inbox = asyncio.Queue()
 		self.replica_addresses = {} # replica_id -> (host: string, port: int)
 		self.replica_conns = {} # replica_id -> (reader, writer)
+		self.client_conns = {} # client_id -> (reader, writer)
 		self.server = None
 		self.host = host
 		self.port = port
@@ -49,7 +50,7 @@ class Network:
 					continue
 				msg = pickle.loads(packet)
 				if msg.msg_type == Message_types.CLIENT_REQ:
-					self.client_replica_conns[msg.cmds.client_id] = (reader, writer)
+					self.client_conns[msg.cmds.client_id] = (reader, writer)
 				await self.inbox.put(msg)
 		except asyncio.IncompleteReadError:
 			pass
@@ -59,12 +60,6 @@ class Network:
 			writer.close()
 			await writer.wait_closed()
 
-	async def client_respond(self, client_id, msg):
-		if client_id not in self.client_replica_conns:
-			return
-
-		reader, writer = self.client_replica_conns[client_id]
-	
 	async def send(self, recipient_id, msg):
 		if recipient_id == self.replica_id:
 			await self.inbox.put(msg)
@@ -81,6 +76,12 @@ class Network:
 		writer.write(msg_byte_count.to_bytes(4, 'big'))
 		writer.write(packet)
 		await writer.drain()
+
+	async def client_respond(self, msg, client_id):
+		if client_id not in self.client_conns:
+			return
+
+		reader,writer = self.client_conns[client_id]
 
 	async def broadcast(self, msg):
 		tasks = []
