@@ -33,6 +33,7 @@ class Message_types(Enum):
 	COMMIT = 5421315
 	COMMIT_VOTE = 5421316
 	DECIDE = 5421317
+	CLIENT_REQ = 5421318
 
 	def __str__(self):
 		return self.name
@@ -109,13 +110,14 @@ def matching_qc(qc, t, v):
 GENESIS_QC = QC(Message_types.PREPARE, 0, GENESIS_BLOCK)
 
 class Message:
-	def __init__(self, msg_type, view_number, block, qc, sig=None, sender=None):
+	def __init__(self, msg_type, view_number, block, qc, sig=None, sender=None, cmd=None):
 		self.msg_type = msg_type
 		self.view_number = view_number
 		self.block = block
 		self.justify = qc 
 		self.partial_sig = sig
 		self.sender = sender
+		self.cmd = []
 	
 	def __repr__(self):
 		return f"Msg(type:{self.msg_type}, view:{self.view_number}, from:{self.sender})"
@@ -129,8 +131,8 @@ class Network:
 		# the id of the replica who uses the object
 		self.replica_id = replica_id
 		self.inbox = asyncio.Queue()
-		self.address_book = {} # replica_id -> (host: string, port: int)
-		self.conns = {} # replica_id -> (reader, writer)
+		self.replica_addresses = {} # replica_id -> (host: string, port: int)
+		self.replica_conns = {} # replica_id -> (reader, writer)
 		self.server = None
 		self.host = host
 		self.port = port
@@ -143,16 +145,16 @@ class Network:
 		)
 	
 	async def connect(self, replica_id):
-		if replica_id in self.conns:
+		if replica_id in self.replica_conns:
 			return True
 
-		if replica_id not in self.address_book:
+		if replica_id not in self.replica_addresses:
 			return False
 		
 		for attempt in range(3):
 			try:
-				host, port = self.address_book[replica_id]
-				self.conns[replica_id] = await asyncio.open_connection(host, port)
+				host, port = self.replica_addresses[replica_id]
+				self.replica_conns[replica_id] = await asyncio.open_connection(host, port)
 				return True
 			except ConnectionRefusedError:
 				await asyncio.sleep(0.2)
@@ -169,6 +171,8 @@ class Network:
 				if not packet:
 					continue
 				msg = pickle.loads(packet)
+				if msg.msg_type == Message_types.CLIENT_REQ:
+					self.client_replica_conns[msg.cmds.client_id] = (reader, writer)
 				await self.inbox.put(msg)
 		except asyncio.IncompleteReadError:
 			pass
@@ -177,6 +181,12 @@ class Network:
 		finally:
 			writer.close()
 			await writer.wait_closed()
+
+	async def client_respond(self, client_id, msg):
+		if client_id not in self.client_replica_conns:
+			return
+
+		reader, writer = self.client_replica_conns[client_id]
 	
 	async def send(self, recipient_id, msg):
 		if recipient_id == self.replica_id:
@@ -186,7 +196,7 @@ class Network:
 		if not await self.connect(recipient_id):
 			return
 
-		_, writer = self.conns[recipient_id]
+		_, writer = self.replica_conns[recipient_id]
 		
 		packet = pickle.dumps(msg)
 		msg_byte_count = len(packet)
@@ -197,14 +207,14 @@ class Network:
 
 	async def broadcast(self, msg):
 		tasks = []
-		for replica_id in self.address_book:
+		for replica_id in self.replica_addresses:
 			tasks.append(self.send(replica_id, msg))
 		await asyncio.gather(*tasks)
 
 	async def stop_server(self):
 		self.server.close()
-		for replica_id in self.conns:
-			_, writer = self.conns[replica_id]
+		for replica_id in self.replica_conns:
+			_, writer = self.replica_conns[replica_id]
 			writer.close()
 			await writer.wait_closed()
 
@@ -632,7 +642,7 @@ class Delayed_network(Network):
 		if not await self.connect(recipient_id):
 			return
 
-		_, writer = self.conns[recipient_id]
+		_, writer = self.replica_conns[recipient_id]
 		
 		packet = pickle.dumps(msg)
 		msg_byte_count = len(packet)
@@ -649,7 +659,7 @@ class Malicious_replica(Replica):
 class Malicious_network(Network):
 	async def broadcast(self, msg):
 		tasks = []
-		for replica_id in self.address_book:
+		for replica_id in self.replica_addresses:
 			mal_block = Block(
 					"malicious_cmd_for_{replica_id}",
 					msg.justify.block,
@@ -666,8 +676,31 @@ class Malicious_network(Network):
 			tasks.append(self.send(replica_id, mal_msg))
 		await asyncio.gather(*tasks)
 
+class Client:
+	def __init__(self, client_id, replica_addresses):
+		self.client_id = client_id
+		self.replica_addresses = replica_addresses
+		self.replica_conns = []
+
+	async def connect(self, replica_id):
+		if replica_id in self.replica_conns:
+			return True
+
+		if replica_id not in self.replica_addresses:
+			return False
+		
+		for attempt in range(3):
+			try:
+				host, port = self.replica_addresses[replica_id]
+				self.replica_conns[replica_id] = await asyncio.open_connection(host, port)
+				return True
+			except ConnectionRefusedError:
+				await asyncio.sleep(0.2)
+		return False
+		
+
 async def simulation():
-	address_book = {
+	replica_addresses = {
 		0: ('127.0.0.1', 50000),
 		1: ('127.0.0.1', 50001),
 		2: ('127.0.0.1', 50002),
@@ -684,19 +717,19 @@ async def simulation():
 		crash_view = 10
 		if replica_types[i] == Fault_types.HONEST:
 			network = Network(i, '127.0.0.1', 50000+i)
-			network.address_book = address_book
+			network.replica_addresses = replica_addresses
 			replica = Replica(i, network)
 		elif replica_types[i] == Fault_types.CRASH:
 			network = Network(i, '127.0.0.1', 50000+i)
-			network.address_book = address_book
+			network.replica_addresses = replica_addresses
 			replica = Crash_replica(i, network, crash_view)
 		elif replica_types[i] == Fault_types.DELAYED:
 			network = Delayed_network(i, '127.0.0.1', 50000+i)
-			network.address_book = address_book
+			network.replica_addresses = replica_addresses
 			replica = Delayed_replica(i, network)
 		elif replica_types[i] == Fault_types.MALICIOUS:
 			network = Malicious_network(i, '127.0.0.1', 50000+i)
-			network.address_book = address_book
+			network.replica_addresses = replica_addresses
 			replica = Malicious_replica(i, network)
 		replicas.append(replica)
 	
