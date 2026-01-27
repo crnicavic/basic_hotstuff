@@ -76,11 +76,13 @@ class Network:
 		await writer.drain()
 
 	async def client_respond(self, req):
-		if client_id not in self.client_conns:
+		if req.client_id not in self.client_conns:
 			return
 
 		reader,writer = self.client_conns[client_id]
 		packet = pickle.dumps(req)
+		req_byte_count = len(packet)
+		writer.write(req_byte_count.to_bytes(4, 'big'))
 		writer.write(packet)
 		await writer.drain()
 

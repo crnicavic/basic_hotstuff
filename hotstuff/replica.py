@@ -83,7 +83,7 @@ class Replica:
 		await self.network.broadcast(msg)
 
 	async def handle_client_req(self, msg):
-		self.network.respond(msg)
+		self.network.client_respond(msg)
 
 	# NEW-VIEW - replica
 	async def start_new_view(self, new_view):
@@ -341,7 +341,7 @@ class Replica:
 				msg = await asyncio.wait_for(self.network.inbox.get(), timeout=1.0)
 				if isinstance(msg, Client_request):
 					self.handle_client_req(msg)
-					return
+					continue
 				
 				match msg.phase:
 					case Protocol_phase.NEW_VIEW:

@@ -26,16 +26,16 @@ class Client:
 				self.replica_conns[replica_id] = await asyncio.open_connection(host, port)
 				return True
 			except ConnectionRefusedError:
+				print("refused")
 				await asyncio.sleep(0.2)
 		return False
 
 	async def send_request(self, recipient_id, req):
 		if not await self.connect(recipient_id):
-			return
-		
+			return	
 		reader, writer = self.replica_conns[recipient_id]
 		
-		packet = pickle.dumps(msg)
+		packet = pickle.dumps(req)
 		msg_byte_count = len(packet)
 
 		writer.write(msg_byte_count.to_bytes(4, 'big'))
@@ -88,11 +88,9 @@ async def simulation():
 		replicas.append(replica)
 	
 	tasks = [replica.run() for replica in replicas]
-	
+	await asyncio.sleep(4.0)	
 	client = Client(0, replica_addresses) 
-	cmd = Command("ADD", [10, 10])
-	req = Client_request(cmd, client.client_id)
-	await client.send_request(2, cmd) 
+	await client.connect(2)
 	try:
 		# run for 5 secs
 		await asyncio.wait_for(
