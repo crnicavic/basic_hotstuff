@@ -1,6 +1,6 @@
 from network import *
 from replica import *
-from protocol_types import *
+from hotstuff_types import *
 
 class Crash_replica(Replica):
 	def __init__(self, replica_id, network, crash_view):
@@ -37,22 +37,22 @@ class Crash_replica(Replica):
 			try:
 				msg = await asyncio.wait_for(self.network.inbox.get(), timeout=1.0)
 				
-				match msg.msg_type:
-					case Message_types.NEW_VIEW:
+				match msg.phase:
+					case Protocol_phase.NEW_VIEW:
 						await self.handle_new_view(msg)
-					case Message_types.PREPARE:
+					case Protocol_phase.PREPARE:
 						await self.handle_prepare(msg)
-					case Message_types.PREPARE_VOTE:
+					case Protocol_phase.PREPARE_VOTE:
 						await self.handle_prepare_vote(msg)
-					case Message_types.PRECOMMIT:
+					case Protocol_phase.PRECOMMIT:
 						await self.handle_precommit(msg)
-					case Message_types.PRECOMMIT_VOTE:
+					case Protocol_phase.PRECOMMIT_VOTE:
 						await self.handle_precommit_vote(msg)
-					case Message_types.COMMIT:
+					case Protocol_phase.COMMIT:
 						await self.handle_commit(msg)
-					case Message_types.COMMIT_VOTE:
+					case Protocol_phase.COMMIT_VOTE:
 						await self.handle_commit_vote(msg)
-					case Message_types.DECIDE:
+					case Protocol_phase.DECIDE:
 						await self.handle_decide(msg)
 					
 			except asyncio.TimeoutError:
@@ -95,8 +95,8 @@ class Malicious_network(Network):
 					msg.view_number
 			)
 
-			mal_msg = Message(
-					Message_types.PREPARE,
+			mal_msg = Protocol_message(
+					Protocol_phase.PREPARE,
 					msg.view_number,
 					mal_block,
 					msg.justify,

@@ -1,6 +1,6 @@
 import pickle
 import asyncio
-from protocol_types import *
+from hotstuff_types import *
 
 # replica's way of talking with the world
 class Network:
@@ -49,8 +49,6 @@ class Network:
 				if not packet:
 					continue
 				msg = pickle.loads(packet)
-				if msg.msg_type == Message_types.CLIENT_REQ:
-					self.client_conns[msg.cmds.client_id] = (reader, writer)
 				await self.inbox.put(msg)
 		except asyncio.IncompleteReadError:
 			pass
@@ -77,11 +75,14 @@ class Network:
 		writer.write(packet)
 		await writer.drain()
 
-	async def client_respond(self, msg, client_id):
+	async def client_respond(self, req):
 		if client_id not in self.client_conns:
 			return
 
 		reader,writer = self.client_conns[client_id]
+		packet = pickle.dumps(req)
+		writer.write(packet)
+		await writer.drain()
 
 	async def broadcast(self, msg):
 		tasks = []

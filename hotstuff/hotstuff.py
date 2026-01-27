@@ -2,7 +2,7 @@ import asyncio
 import hashlib
 import random
 from collections import Counter
-from protocol_types import *
+from hotstuff_types import *
 from network import *
 from replica import *
 from byzantine import *
@@ -11,7 +11,7 @@ class Client:
 	def __init__(self, client_id, replica_addresses):
 		self.client_id = client_id
 		self.replica_addresses = replica_addresses
-		self.replica_conns = []
+		self.replica_conns = {}
 
 	async def connect(self, replica_id):
 		if replica_id in self.replica_conns:
@@ -29,7 +29,7 @@ class Client:
 				await asyncio.sleep(0.2)
 		return False
 
-	def send_request(self, recipient_id, msg):		
+	async def send_request(self, recipient_id, req):
 		if not await self.connect(recipient_id):
 			return
 		
@@ -48,7 +48,7 @@ class Client:
 
 		packet = await reader.read(msg_byte_count)
 		if not packet:
-			continue
+			return	
 
 		msg = pickle.loads(packet)
 		print(msg)
@@ -89,6 +89,10 @@ async def simulation():
 	
 	tasks = [replica.run() for replica in replicas]
 	
+	client = Client(0, replica_addresses) 
+	cmd = Command("ADD", [10, 10])
+	req = Client_request(cmd, client.client_id)
+	await client.send_request(2, cmd) 
 	try:
 		# run for 5 secs
 		await asyncio.wait_for(

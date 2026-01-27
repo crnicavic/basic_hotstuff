@@ -1,5 +1,5 @@
 import asyncio
-from protocol_types import *
+from hotstuff_types import *
 from network import *
 
 class Pacemaker:
@@ -43,6 +43,7 @@ class Replica:
 		self.current_view = 0
 		self.current_proposal = None
 		self.log = [GENESIS_BLOCK]
+		self.pending_reqs = []
 		
 		self.new_view_msgs = {}
 		self.prepare_votes = {}
@@ -81,6 +82,9 @@ class Replica:
 		msg.sender = self.replica_id
 		await self.network.broadcast(msg)
 
+	async def handle_client_req(self, msg):
+		self.network.respond(msg)
+
 	# NEW-VIEW - replica
 	async def start_new_view(self, new_view):
 		if new_view <= self.current_view:
@@ -93,8 +97,8 @@ class Replica:
 		
 		self.trace(f"Entering view {new_view} {'(LEADER)' if self.is_leader else ''}")
 		
-		msg = Message(
-			Message_types.NEW_VIEW,
+		msg = Protocol_message(
+			Protocol_phase.NEW_VIEW,
 			new_view,
 			None,
 			self.high_prepare_qc,
@@ -102,15 +106,10 @@ class Replica:
 		)
 		await self.send(leader_id, msg)
 
-	async def handle_client_req(self, msg):
-		if not msg.msg_type == Message_types.CLIENT_REQ:
-			return
-
-		self.network.client_respond(msg, msg.client_id)
-
 	# PREPARE - leader
 	async def handle_new_view(self, msg):
-		if not self.is_leader or not matching_msg(msg, Message_types.NEW_VIEW, self.current_view):
+		if not self.is_leader or \
+			not matching_msg(msg, Protocol_phase.NEW_VIEW, self.current_view):
 			return
 		
 		if msg.view_number not in self.new_view_msgs:
@@ -124,14 +123,17 @@ class Replica:
 				key=lambda m: m.justify.view_number
 			).justify
 			
+			if len(self.pending_reqs) <= 0:
+				return
+			cmds = self.pending_reqs.pop(0) 
 			proposal_block = Block(
-				f"cmd_{self.current_view}",
+				cmds,
 				highest_qc.block,
 				self.current_view
 			)
 			
-			proposal_msg = Message(
-				Message_types.PREPARE,
+			proposal_msg = Protocol_message(
+				Protocol_phase.PREPARE,
 				self.current_view,
 				proposal_block,
 				highest_qc
@@ -142,35 +144,37 @@ class Replica:
 
 	# PREPARE - replica
 	async def handle_prepare(self, msg):
-		if not matching_msg(msg, Message_types.PREPARE, self.current_view):
+		if not matching_msg(msg, Protocol_phase.PREPARE, self.current_view):
 			return
 		
-		if self.extends(msg.block, msg.justify.block) and self.safe_block(msg.block, msg.justify):
+		if self.extends(msg.block, msg.justify.block) \
+			and self.safe_block(msg.block, msg.justify):
 			self.pacemaker.stop_timer()
 			self.trace(f"Voting for {msg.block}")
 			self.current_proposal = msg.block
 
 			partial_sig = Signature.partial_sign(
 				self.current_view,
-				Message_types.PREPARE_VOTE,
+				Protocol_phase.PREPARE_VOTE,
 				msg.block.hash
 			)
 
-			vote_msg = Message(
-				Message_types.PREPARE_VOTE,
+			vote_msg = Protocol_message(
+				Protocol_phase.PREPARE_VOTE,
 				self.current_view,
 				msg.block,
 				None,
 				partial_sig
 			)
-			
+
 			leader_id = self.pacemaker.get_leader(self.current_view)
 			self.pacemaker.start_timer()
 			await self.send(leader_id, vote_msg)
 
 	# PRECOMMIT - leader
 	async def handle_prepare_vote(self, msg):
-		if not self.is_leader or not matching_msg(msg, Message_types.PREPARE_VOTE, self.current_view):
+		if not self.is_leader or \
+			not matching_msg(msg, Protocol_phase.PREPARE_VOTE, self.current_view):
 			return
 		
 		if msg.view_number not in self.prepare_votes:
@@ -181,7 +185,7 @@ class Replica:
 		
 		if len(self.prepare_votes[msg.view_number]) == QUORUM:
 			qc = QC(
-				Message_types.PREPARE,
+				Protocol_phase.PREPARE,
 				self.current_view,
 				msg.block
 			)
@@ -192,8 +196,8 @@ class Replica:
 			
 			self.trace(f"Leader formed {qc}")
 			
-			precommit_msg = Message(
-				Message_types.PRECOMMIT,
+			precommit_msg = Protocol_message(
+				Protocol_phase.PRECOMMIT,
 				self.current_view,
 				None,
 				qc
@@ -202,7 +206,7 @@ class Replica:
 
 	# PRECOMMIT - replica
 	async def handle_precommit(self, msg):
-		if not matching_qc(msg.justify, Message_types.PREPARE, self.current_view):
+		if not matching_qc(msg.justify, Protocol_phase.PREPARE, self.current_view):
 			return
 		if not msg.justify.signature.verify():
 			return
@@ -212,12 +216,12 @@ class Replica:
 		self.pacemaker.stop_timer()
 		partial_sig = Signature.partial_sign(
 			self.current_view,
-			Message_types.PRECOMMIT_VOTE,
+			Protocol_phase.PRECOMMIT_VOTE,
 			msg.justify.block.hash
 		)
 	
-		vote_msg = Message(
-			Message_types.PRECOMMIT_VOTE,
+		vote_msg = Protocol_message(
+			Protocol_phase.PRECOMMIT_VOTE,
 			self.current_view,
 			msg.justify.block,
 			None,
@@ -230,7 +234,8 @@ class Replica:
 
 	# COMMIT - leader
 	async def handle_precommit_vote(self, msg):
-		if not self.is_leader or not matching_msg(msg, Message_types.PRECOMMIT_VOTE, self.current_view):
+		if not self.is_leader or \
+			not matching_msg(msg, Protocol_phase.PRECOMMIT_VOTE, self.current_view):
 			return
 		
 		if msg.view_number not in self.precommit_votes:
@@ -242,7 +247,7 @@ class Replica:
 		
 		if len(self.precommit_votes[msg.view_number]) == QUORUM:
 			qc = QC(
-				Message_types.PRECOMMIT,
+				Protocol_phase.PRECOMMIT,
 				self.current_view,
 				msg.block
 			)
@@ -251,8 +256,8 @@ class Replica:
 			
 			self.trace(f"Leader formed {qc}")
 			
-			commit_msg = Message(
-				Message_types.COMMIT,
+			commit_msg = Protocol_message(
+				Protocol_phase.COMMIT,
 				self.current_view,
 				None,
 				qc
@@ -261,9 +266,8 @@ class Replica:
 
 	# COMMIT - replica
 	async def handle_commit(self, msg):
-		if not matching_qc(msg.justify, Message_types.PRECOMMIT, self.current_view):
-			return
-		if not msg.justify.signature.verify():
+		if not msg.justify.signature.verify() or \
+			not matching_qc(msg.justify, Protocol_phase.PRECOMMIT, self.current_view):
 			return
 		
 		if msg.justify.view_number > self.locked_qc.view_number:
@@ -272,11 +276,11 @@ class Replica:
 		self.pacemaker.stop_timer()	
 		partial_sig = Signature.partial_sign(
 			self.current_view,
-			Message_types.COMMIT_VOTE,
+			Protocol_phase.COMMIT_VOTE,
 			msg.justify.block.hash
 		)	
-		vote_msg = Message(
-			Message_types.COMMIT_VOTE,
+		vote_msg = Protocol_message(
+			Protocol_phase.COMMIT_VOTE,
 			self.current_view,
 			msg.justify.block,
 			None,
@@ -289,7 +293,8 @@ class Replica:
 
 	# DECIDE - leader
 	async def handle_commit_vote(self, msg):
-		if not self.is_leader or not matching_msg(msg, Message_types.COMMIT_VOTE, self.current_view):
+		if not self.is_leader or \
+			not matching_msg(msg, Protocol_phase.COMMIT_VOTE, self.current_view):
 			return
 		
 		if msg.view_number not in self.commit_votes:
@@ -300,7 +305,7 @@ class Replica:
 		
 		if len(self.commit_votes[msg.view_number]) == QUORUM:
 			qc = QC(
-				Message_types.COMMIT,
+				Protocol_phase.COMMIT,
 				self.current_view,
 				msg.block
 			)
@@ -309,8 +314,8 @@ class Replica:
 			
 			self.trace(f"Leader formed {qc}")
 			
-			decide_msg = Message(
-				Message_types.DECIDE,
+			decide_msg = Protocol_message(
+				Protocol_phase.DECIDE,
 				self.current_view,
 				None,
 				qc
@@ -319,9 +324,8 @@ class Replica:
 
 	# DECIDE - replica
 	async def handle_decide(self, msg):
-		if not matching_qc(msg.justify, Message_types.COMMIT, self.current_view):
-			return
-		if not msg.justify.signature.verify():
+		if not msg.justify.signature.verify() or \
+			not matching_qc(msg.justify, Protocol_phase.COMMIT, self.current_view):
 			return
 		
 		self.trace(f"Executing {msg.justify.block.cmds}")
@@ -335,26 +339,27 @@ class Replica:
 		while self.running:
 			try:
 				msg = await asyncio.wait_for(self.network.inbox.get(), timeout=1.0)
+				if isinstance(msg, Client_request):
+					self.handle_client_req(msg)
+					return
 				
-				match msg.msg_type:
-					case Message_types.NEW_VIEW:
+				match msg.phase:
+					case Protocol_phase.NEW_VIEW:
 						await self.handle_new_view(msg)
-					case Message_types.PREPARE:
+					case Protocol_phase.PREPARE:
 						await self.handle_prepare(msg)
-					case Message_types.PREPARE_VOTE:
+					case Protocol_phase.PREPARE_VOTE:
 						await self.handle_prepare_vote(msg)
-					case Message_types.PRECOMMIT:
+					case Protocol_phase.PRECOMMIT:
 						await self.handle_precommit(msg)
-					case Message_types.PRECOMMIT_VOTE:
+					case Protocol_phase.PRECOMMIT_VOTE:
 						await self.handle_precommit_vote(msg)
-					case Message_types.COMMIT:
+					case Protocol_phase.COMMIT:
 						await self.handle_commit(msg)
-					case Message_types.COMMIT_VOTE:
+					case Protocol_phase.COMMIT_VOTE:
 						await self.handle_commit_vote(msg)
-					case Message_types.DECIDE:
+					case Protocol_phase.DECIDE:
 						await self.handle_decide(msg)
-					case Message_types.CLIENT_REQ:
-						await self.handle_client_req(msg)
 					
 			except asyncio.TimeoutError:
 				continue
