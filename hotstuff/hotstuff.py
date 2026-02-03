@@ -31,28 +31,32 @@ class Client:
 				await asyncio.sleep(0.2)
 		return False
 
+	async def trace(self, string):
+		print(f"[C{self.client_id}] {string}")
+
 	async def send_request(self, recipient_id, req):
+		# SEND
 		if not await self.connect(recipient_id):
 			return	
 		reader, writer = self.replica_conns[recipient_id]
 		
 		packet = pickle.dumps(req)
-		msg_byte_count = len(packet)
+		packet_byte_count = len(packet)
 
-		writer.write(msg_byte_count.to_bytes(4, 'big'))
+		writer.write(packet_byte_count.to_bytes(4, 'big'))
 		writer.write(packet)
 		await writer.drain()
-
+		# RECV
 		# first 32 bits of message are the byte count
-		msg_byte_count = await reader.readexactly(4)
-		msg_byte_count = int.from_bytes(msg_byte_count, 'big')				
+		packet_byte_count = await reader.readexactly(4)
+		packet_byte_count = int.from_bytes(msg_byte_count, 'big')				
 
 		packet = await reader.read(msg_byte_count)
 		if not packet:
 			return	
 
-		msg = pickle.loads(packet)
-		print(msg)
+		response = pickle.loads(packet)
+		self.responses.append(response)
 
 	async def broadcast_request(self, req):
 		tasks = []
@@ -68,7 +72,7 @@ async def simulation():
 		3: ('127.0.0.1', 50003)
 	}	
 	replica_types = {
-		0: Fault_types.MALICIOUS,
+		0: Fault_types.CRASH,
 		1: Fault_types.HONEST,
 		2: Fault_types.HONEST,
 		3: Fault_types.HONEST

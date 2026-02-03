@@ -4,25 +4,7 @@ from hotstuff_types import *
 
 class Crash_replica(Replica):
 	def __init__(self, replica_id, network, crash_view):
-		self.replica_id = replica_id
-		self.network = network
-		self.current_view = 0
-		self.current_proposal = None
-		self.log = [GENESIS_BLOCK]
-		
-		self.new_view_msgs = {}
-		self.prepare_votes = {}
-		self.precommit_votes = {}
-		self.commit_votes = {}
-		
-		self.high_prepare_qc = GENESIS_QC
-		self.locked_qc = GENESIS_QC
-		
-		self.is_leader = False
-		self.running = True
-
-		self.pacemaker = Pacemaker(2.0, self.start_new_view)
-
+		super(Crash_replica, self).__init__(replica_id, network)
 		self.crash_view = crash_view
 
 	def trace(self, string):
@@ -35,25 +17,28 @@ class Crash_replica(Replica):
 				self.pacemaker.stop_timer()
 				self.running = False
 			try:
-				msg = await asyncio.wait_for(self.network.inbox.get(), timeout=1.0)
+				payload = await asyncio.wait_for(self.network.inbox.get(), timeout=1.0)
+				if isinstance(payload, Command):
+					await self.handle_client_cmd(payload)
+					continue
 				
-				match msg.phase:
+				match payload.phase:
 					case Protocol_phase.NEW_VIEW:
-						await self.handle_new_view(msg)
+						await self.handle_new_view(payload)
 					case Protocol_phase.PREPARE:
-						await self.handle_prepare(msg)
+						await self.handle_prepare(payload)
 					case Protocol_phase.PREPARE_VOTE:
-						await self.handle_prepare_vote(msg)
+						await self.handle_prepare_vote(payload)
 					case Protocol_phase.PRECOMMIT:
-						await self.handle_precommit(msg)
+						await self.handle_precommit(payload)
 					case Protocol_phase.PRECOMMIT_VOTE:
-						await self.handle_precommit_vote(msg)
+						await self.handle_precommit_vote(payload)
 					case Protocol_phase.COMMIT:
-						await self.handle_commit(msg)
+						await self.handle_commit(payload)
 					case Protocol_phase.COMMIT_VOTE:
-						await self.handle_commit_vote(msg)
+						await self.handle_commit_vote(payload)
 					case Protocol_phase.DECIDE:
-						await self.handle_decide(msg)
+						await self.handle_decide(payload)
 					
 			except asyncio.TimeoutError:
 				continue

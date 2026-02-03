@@ -81,7 +81,7 @@ class Network:
 		if req.sender not in self.client_conns:
 			return
 
-		reader,writer = self.client_conns[req.sender]
+		reader, writer = self.client_conns[req.sender]
 		packet = pickle.dumps(req)
 		req_byte_count = len(packet)
 		writer.write(req_byte_count.to_bytes(4, 'big'))

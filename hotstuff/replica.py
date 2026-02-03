@@ -74,7 +74,6 @@ class Replica:
 		return (self.extends(block, self.locked_qc.block) or 
 		        (qc.view_number > self.locked_qc.view_number))
 
-
 	async def send(self, recipient_id, msg):
 		msg.sender = self.replica_id
 		await self.network.send(recipient_id, msg)
