@@ -12,6 +12,7 @@ class Client:
 		self.client_id = client_id
 		self.replica_addresses = replica_addresses
 		self.replica_conns = {}
+		self.responses = []
 
 	async def connect(self, replica_id):
 		if replica_id in self.replica_conns:
@@ -53,6 +54,12 @@ class Client:
 		msg = pickle.loads(packet)
 		print(msg)
 
+	async def broadcast_request(self, req):
+		tasks = []
+		for replica_id in self.replica_addresses:
+			tasks.append(self.send_request(replica_id, req))
+		await asyncio.gather(*tasks)
+
 async def simulation():
 	replica_addresses = {
 		0: ('127.0.0.1', 50000),
@@ -87,10 +94,10 @@ async def simulation():
 			replica = Malicious_replica(i, network)
 		replicas.append(replica)
 	
-	tasks = [replica.run() for replica in replicas]
-	await asyncio.sleep(4.0)	
 	client = Client(0, replica_addresses) 
-	await client.connect(2)
+	tasks = [replica.run() for replica in replicas]
+	cmd = Command("SET", ["A", 10], client.client_id)
+	tasks.append(client.send_request(2, cmd))
 	try:
 		# run for 5 secs
 		await asyncio.wait_for(
@@ -105,6 +112,7 @@ async def simulation():
 		for replica in replicas:
 			print(f"Replica {replica.replica_id}: log length={len(replica.log)}, "
 			      f"locked view={replica.locked_qc.view_number}")
+			print(f"STATE: {replica.state}")
 			await replica.network.stop_server()
 
 async def main():

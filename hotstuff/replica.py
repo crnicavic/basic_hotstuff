@@ -43,7 +43,7 @@ class Replica:
 		self.current_view = 0
 		self.current_proposal = None
 		self.log = [GENESIS_BLOCK]
-		self.pending_reqs = []
+		self.pending_cmds = []
 		
 		self.new_view_msgs = {}
 		self.prepare_votes = {}
@@ -57,6 +57,7 @@ class Replica:
 		self.running = True
 
 		self.pacemaker = Pacemaker(2.0, self.start_new_view)
+		self.state = {}
 
 	def trace(self, string):
 		print(f"[R{self.replica_id}][HONEST] {string}")
@@ -82,8 +83,9 @@ class Replica:
 		msg.sender = self.replica_id
 		await self.network.broadcast(msg)
 
-	async def handle_client_req(self, msg):
-		self.network.client_respond(msg)
+	async def handle_client_cmd(self, cmd):
+		print(cmd)
+		self.pending_cmds.append(cmd)
 
 	# NEW-VIEW - replica
 	async def start_new_view(self, new_view):
@@ -123,9 +125,9 @@ class Replica:
 				key=lambda m: m.justify.view_number
 			).justify
 			
-			if len(self.pending_reqs) <= 0:
+			if len(self.pending_cmds) <= 0:
 				return
-			cmds = self.pending_reqs.pop(0) 
+			cmds = [self.pending_cmds[0]]
 			proposal_block = Block(
 				cmds,
 				highest_qc.block,
@@ -241,7 +243,7 @@ class Replica:
 		if msg.view_number not in self.precommit_votes:
 			self.precommit_votes[msg.view_number] = []
 		
-		#dont count bogus votes	
+		# dont count bogus votes	
 		if msg.block.hash == self.current_proposal.hash:
 			self.precommit_votes[msg.view_number].append(msg)
 		
@@ -329,6 +331,15 @@ class Replica:
 			return
 		
 		self.trace(f"Executing {msg.justify.block.cmds}")
+		for cmd in msg.justify.block.cmds:
+			match cmd.op:
+				case "SET":
+					self.state[cmd.args[0]] = cmd.args[1]
+			
+			for pending_cmd in self.pending_cmds:
+				if pending_cmd.hash == cmd.hash:
+					self.pending_cmds.remove(pending_cmd)
+					break
 		self.log.append(msg.justify.block)
 		
 		# let others catch-up
@@ -338,28 +349,28 @@ class Replica:
 	async def message_handler(self):
 		while self.running:
 			try:
-				msg = await asyncio.wait_for(self.network.inbox.get(), timeout=1.0)
-				if isinstance(msg, Client_request):
-					self.handle_client_req(msg)
+				payload = await asyncio.wait_for(self.network.inbox.get(), timeout=1.0)
+				if isinstance(payload, Command):
+					await self.handle_client_cmd(payload)
 					continue
 				
-				match msg.phase:
+				match payload.phase:
 					case Protocol_phase.NEW_VIEW:
-						await self.handle_new_view(msg)
+						await self.handle_new_view(payload)
 					case Protocol_phase.PREPARE:
-						await self.handle_prepare(msg)
+						await self.handle_prepare(payload)
 					case Protocol_phase.PREPARE_VOTE:
-						await self.handle_prepare_vote(msg)
+						await self.handle_prepare_vote(payload)
 					case Protocol_phase.PRECOMMIT:
-						await self.handle_precommit(msg)
+						await self.handle_precommit(payload)
 					case Protocol_phase.PRECOMMIT_VOTE:
-						await self.handle_precommit_vote(msg)
+						await self.handle_precommit_vote(payload)
 					case Protocol_phase.COMMIT:
-						await self.handle_commit(msg)
+						await self.handle_commit(payload)
 					case Protocol_phase.COMMIT_VOTE:
-						await self.handle_commit_vote(msg)
+						await self.handle_commit_vote(payload)
 					case Protocol_phase.DECIDE:
-						await self.handle_decide(msg)
+						await self.handle_decide(payload)
 					
 			except asyncio.TimeoutError:
 				continue

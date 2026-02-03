@@ -42,14 +42,16 @@ class Network:
 		try:
 			while True:
 				# first 32 bits of message are the byte count
-				msg_byte_count = await reader.readexactly(4)
-				msg_byte_count = int.from_bytes(msg_byte_count, 'big')				
+				packet_byte_count = await reader.readexactly(4)
+				packet_byte_count = int.from_bytes(packet_byte_count, 'big')				
 
-				packet = await reader.read(msg_byte_count)
+				packet = await reader.read(packet_byte_count)
 				if not packet:
 					continue
-				msg = pickle.loads(packet)
-				await self.inbox.put(msg)
+				payload = pickle.loads(packet)
+				if isinstance(payload, Command):
+					self.client_conns[payload.client_id] = (reader, writer)
+				await self.inbox.put(payload)
 		except asyncio.IncompleteReadError:
 			pass
 		except Exception as e:
@@ -76,10 +78,10 @@ class Network:
 		await writer.drain()
 
 	async def client_respond(self, req):
-		if req.client_id not in self.client_conns:
+		if req.sender not in self.client_conns:
 			return
 
-		reader,writer = self.client_conns[client_id]
+		reader,writer = self.client_conns[req.sender]
 		packet = pickle.dumps(req)
 		req_byte_count = len(packet)
 		writer.write(req_byte_count.to_bytes(4, 'big'))

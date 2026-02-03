@@ -34,15 +34,21 @@ class Fault_types(Enum):
 		return self.name
 
 class Command:
-	def __init__(self, op, args):
+	def __init__(self, op, args, client_id):
 		self.op = op
 		self.args = args
+		self.client_id = client_id 
+		self.hash = self.calculate_hash()
 
 	def calculate_hash(self):
 		h = hashlib.sha256()
 		h.update(str(self.op).encode())
 		h.update(str(self.args).encode())
-		return h
+		h.update(str(self.client_id).encode())
+		return h.hexdigest()
+
+	def __repr__(self):
+		return f"CMD: [C{self.client_id}]: {self.op} {self.args}"
 
 class Block:
 	def __init__(self, cmds, parent, view):
@@ -117,11 +123,6 @@ class Protocol_message:
 	
 	def __repr__(self):
 		return f"Msg(type:{self.phase}, view:{self.view_number}, from:{self.sender})"
-
-class Client_request:
-	def __init__(self, cmd, sender=None):
-		self.cmd = cmd
-		self.sender = sender
 
 def matching_msg(m, t, v):
 	return m.phase == t and m.view_number == v
