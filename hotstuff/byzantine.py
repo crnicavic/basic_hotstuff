@@ -80,7 +80,7 @@ class Malicious_network(Network):
 					msg.view_number
 			)
 
-			mal_msg = Protocol_message(
+			mal_msg = Message(
 					Protocol_phase.PREPARE,
 					msg.view_number,
 					mal_block,

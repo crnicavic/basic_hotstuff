@@ -112,7 +112,7 @@ def matching_qc(qc, t, v):
 
 GENESIS_QC = QC(Protocol_phase.PREPARE, 0, GENESIS_BLOCK)
 
-class Protocol_message:
+class Message:
 	def __init__(self, phase, view_number, block, qc, sig=None, sender=None):
 		self.phase = phase
 		self.view_number = view_number

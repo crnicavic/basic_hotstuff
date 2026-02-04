@@ -97,7 +97,7 @@ class Replica:
 		
 		self.trace(f"Entering view {new_view} {'(LEADER)' if self.is_leader else ''}")
 		
-		msg = Protocol_message(
+		msg = Message(
 			Protocol_phase.NEW_VIEW,
 			new_view,
 			None,
@@ -132,7 +132,7 @@ class Replica:
 				self.current_view
 			)
 			
-			proposal_msg = Protocol_message(
+			proposal_msg = Message(
 				Protocol_phase.PREPARE,
 				self.current_view,
 				proposal_block,
@@ -159,7 +159,7 @@ class Replica:
 				msg.block.hash
 			)
 
-			vote_msg = Protocol_message(
+			vote_msg = Message(
 				Protocol_phase.PREPARE_VOTE,
 				self.current_view,
 				msg.block,
@@ -196,7 +196,7 @@ class Replica:
 			
 			self.trace(f"Leader formed {qc}")
 			
-			precommit_msg = Protocol_message(
+			precommit_msg = Message(
 				Protocol_phase.PRECOMMIT,
 				self.current_view,
 				None,
@@ -220,7 +220,7 @@ class Replica:
 			msg.justify.block.hash
 		)
 	
-		vote_msg = Protocol_message(
+		vote_msg = Message(
 			Protocol_phase.PRECOMMIT_VOTE,
 			self.current_view,
 			msg.justify.block,
@@ -256,7 +256,7 @@ class Replica:
 			
 			self.trace(f"Leader formed {qc}")
 			
-			commit_msg = Protocol_message(
+			commit_msg = Message(
 				Protocol_phase.COMMIT,
 				self.current_view,
 				None,
@@ -279,7 +279,7 @@ class Replica:
 			Protocol_phase.COMMIT_VOTE,
 			msg.justify.block.hash
 		)	
-		vote_msg = Protocol_message(
+		vote_msg = Message(
 			Protocol_phase.COMMIT_VOTE,
 			self.current_view,
 			msg.justify.block,
@@ -314,7 +314,7 @@ class Replica:
 			
 			self.trace(f"Leader formed {qc}")
 			
-			decide_msg = Protocol_message(
+			decide_msg = Message(
 				Protocol_phase.DECIDE,
 				self.current_view,
 				None,
