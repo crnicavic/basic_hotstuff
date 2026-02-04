@@ -48,25 +48,25 @@ class Command:
 		return h.hexdigest()
 
 	def __repr__(self):
-		return f"CMD: [C{self.client_id}]: {self.op} {self.args}"
+		return f"CMD([C{self.client_id}]: {self.op} {self.args})"
 
 class Block:
-	def __init__(self, cmds, parent, view):
-		self.cmds = cmds
+	def __init__(self, cmd, parent, view):
+		self.cmd = cmd
 		self.parent = parent
 		self.view = view
 		self.hash = self.compute_hash()
 
 	def compute_hash(self):
 		h = hashlib.sha256()
-		h.update(str(self.cmds).encode())
+		h.update(str(self.cmd).encode())
 		h.update(str(self.view).encode())
 		parent_hash = self.parent.hash if self.parent else "genesis"
 		h.update(parent_hash.encode())
 		return h.hexdigest()
 	
 	def __str__(self):
-		return f"Block(v:{self.view}, cmd:{self.cmds})"
+		return f"Block(v:{self.view}, cmd:{self.cmd})"
 	
 	def __eq__(self, other):
 		return isinstance(other, Block) and self.hash == other.hash

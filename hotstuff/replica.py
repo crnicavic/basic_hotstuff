@@ -83,7 +83,6 @@ class Replica:
 		await self.network.broadcast(msg)
 
 	async def handle_client_cmd(self, cmd):
-		print(cmd)
 		self.pending_cmds.append(cmd)
 
 	# NEW-VIEW - replica
@@ -126,9 +125,9 @@ class Replica:
 			
 			if len(self.pending_cmds) <= 0:
 				return
-			cmds = [self.pending_cmds[0]]
+			cmd = self.pending_cmds[0]
 			proposal_block = Block(
-				cmds,
+				cmd,
 				highest_qc.block,
 				self.current_view
 			)
@@ -329,17 +328,20 @@ class Replica:
 			not matching_qc(msg.justify, Protocol_phase.COMMIT, self.current_view):
 			return
 		
-		self.trace(f"Executing {msg.justify.block.cmds}")
-		for cmd in msg.justify.block.cmds:
-			match cmd.op:
-				case "SET":
-					self.state[cmd.args[0]] = cmd.args[1]
+		cmd = msg.justify.block.cmd
+		match cmd.op:
+			case "SET":
+				self.state[cmd.args[0]] = cmd.args[1]
 			
-			for pending_cmd in self.pending_cmds:
-				if pending_cmd.hash == cmd.hash:
-					self.pending_cmds.remove(pending_cmd)
-					break
+		self.trace(f"Executed {msg.justify.block.cmd}")
+		for pending_cmds in self.pending_cmds:
+			if pending_cmds.hash == cmd.hash:
+				self.pending_cmds.remove(pending_cmds)
+				break
+
 		self.log.append(msg.justify.block)
+
+		await self.network.client_respond(cmd)
 		
 		# let others catch-up
 		await asyncio.sleep(0.1)
