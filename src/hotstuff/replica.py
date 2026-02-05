@@ -1,6 +1,7 @@
 import asyncio
 from hotstuff.hotstuff_types import *
 from hotstuff.network import *
+from math import floor
 
 class Pacemaker:
 	def __init__(self, timeout, replica_callback):
@@ -40,7 +41,7 @@ class Replica:
 	N = 0
 	F = 0
 	QUORUM = 0
-	def __init__(self, replica_id, network):
+	def __init__(self, replica_id, network, timeout=2.0):
 		self.replica_id = replica_id
 		self.network = network
 		self.current_view = 0
@@ -59,10 +60,10 @@ class Replica:
 		self.is_leader = False
 		self.running = True
 
-		self.pacemaker = Pacemaker(2.0, self.start_new_view)
+		self.pacemaker = Pacemaker(timeout, self.start_new_view)
 		self.state = {}
 		Replica.N += 1
-		Replica.F = (Replica.N - 1) / 3
+		Replica.F = floor((Replica.N - 1) / 3)
 		Replica.QUORUM = 2 * Replica.F + 1
 
 	def trace(self, string):

@@ -1,13 +1,11 @@
-N = 4
-F = 1
-QUORUM = 2*F+1
-
 import asyncio
 from hotstuff.hotstuff_types import *
 from hotstuff.network import *
 from hotstuff.replica import *
 from hotstuff.byzantine import *
 from hotstuff.client import *
+
+N = 4
 
 async def main():
 	replica_addresses = {
