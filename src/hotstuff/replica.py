@@ -1,6 +1,6 @@
 import asyncio
-from hotstuff_types import *
-from network import *
+from hotstuff.hotstuff_types import *
+from hotstuff.network import *
 
 class Pacemaker:
 	def __init__(self, timeout, replica_callback):

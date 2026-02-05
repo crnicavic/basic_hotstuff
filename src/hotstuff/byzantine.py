@@ -1,6 +1,6 @@
-from network import *
-from replica import *
-from hotstuff_types import *
+from hotstuff.network import *
+from hotstuff.replica import *
+from hotstuff.hotstuff_types import *
 
 class Crash_replica(Replica):
 	def __init__(self, replica_id, network, crash_view):

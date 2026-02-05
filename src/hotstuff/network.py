@@ -1,6 +1,6 @@
 import pickle
 import asyncio
-from hotstuff_types import *
+from hotstuff.hotstuff_types import *
 
 # replica's way of talking with the world
 class Network:

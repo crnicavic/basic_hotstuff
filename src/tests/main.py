@@ -1,9 +1,9 @@
 import asyncio
-from hotstuff_types import *
-from network import *
-from replica import *
-from byzantine import *
-from client import *
+from hotstuff.hotstuff_types import *
+from hotstuff.network import *
+from hotstuff.replica import *
+from hotstuff.byzantine import *
+from hotstuff.client import *
 
 
 async def simulation():

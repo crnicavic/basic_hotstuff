@@ -1,5 +1,5 @@
 import asyncio
-from hotstuff_types import *
+from hotstuff.hotstuff_types import *
 
 class Client:
 	def __init__(self, client_id, replica_addresses, timeout):
