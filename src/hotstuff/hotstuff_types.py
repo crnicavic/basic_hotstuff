@@ -6,10 +6,6 @@ from enum import Enum
 from typing import Optional, Dict, List
 from collections import Counter
 
-N = 4
-F = 1
-QUORUM = 2*F+1
-
 # some numbers that aren't 0, 1 and so forth
 class Protocol_phase(Enum):
 	NEW_VIEW = 5421310
@@ -97,12 +93,15 @@ class Signature:
 			return True
 		return False
 
+# hack that totally won't bite me later
+GENESIS_SIG = Signature(0, 0)
+
 class QC:
-	def __init__(self, phase, view_number, block):
+	def __init__(self, phase, view_number, block, sig):
 		self.phase = phase
 		self.view_number = view_number
 		self.block = block
-		self.signature = Signature(N, F)
+		self.signature = sig
 
 	def __str__(self):
 		return f"QC(type:{self.phase}, view:{self.view_number})"
@@ -110,7 +109,7 @@ class QC:
 def matching_qc(qc, t, v):
 	return qc.phase == t and qc.view_number == v
 
-GENESIS_QC = QC(Protocol_phase.PREPARE, 0, GENESIS_BLOCK)
+GENESIS_QC = QC(Protocol_phase.PREPARE, 0, GENESIS_BLOCK, GENESIS_SIG)
 
 class Message:
 	def __init__(self, phase, view_number, block, qc, sig=None, sender=None):

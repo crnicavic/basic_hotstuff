@@ -11,7 +11,7 @@ class Pacemaker:
 		self.replica_callback = replica_callback
 
 	def get_leader(self, view):
-		return view % N
+		return view % Replica.N
 
 	# when no progress is made
 	async def on_timeout(self):
@@ -37,6 +37,9 @@ class Pacemaker:
 			self.task.cancel()
 
 class Replica:
+	N = 0
+	F = 0
+	QUORUM = 0
 	def __init__(self, replica_id, network):
 		self.replica_id = replica_id
 		self.network = network
@@ -58,6 +61,9 @@ class Replica:
 
 		self.pacemaker = Pacemaker(2.0, self.start_new_view)
 		self.state = {}
+		Replica.N += 1
+		Replica.F = (Replica.N - 1) / 3
+		Replica.QUORUM = 2 * Replica.F + 1
 
 	def trace(self, string):
 		print(f"[R{self.replica_id}][HONEST] {string}")
@@ -117,7 +123,7 @@ class Replica:
 		
 		self.new_view_msgs[msg.view_number].append(msg)
 		
-		if len(self.new_view_msgs[msg.view_number]) == QUORUM:
+		if len(self.new_view_msgs[msg.view_number]) == Replica.QUORUM:
 			highest_qc = max(
 				self.new_view_msgs[msg.view_number],
 				key=lambda m: m.justify.view_number
@@ -183,14 +189,18 @@ class Replica:
 		if msg.block.hash == self.current_proposal.hash:	
 			self.prepare_votes[msg.view_number].append(msg)
 		
-		if len(self.prepare_votes[msg.view_number]) == QUORUM:
+		if len(self.prepare_votes[msg.view_number]) == Replica.QUORUM:
+			sig = Signature(Replica.N, Replica.F)
+
+			for vote in self.prepare_votes[msg.view_number]:
+				sig.combine(vote.partial_sig)
+
 			qc = QC(
 				Protocol_phase.PREPARE,
 				self.current_view,
-				msg.block
+				msg.block,
+				sig
 			)
-			for vote in self.prepare_votes[msg.view_number]:
-				qc.signature.combine(vote.partial_sig)
 			
 			self.high_prepare_qc = qc
 			
@@ -245,14 +255,18 @@ class Replica:
 		if msg.block.hash == self.current_proposal.hash:
 			self.precommit_votes[msg.view_number].append(msg)
 		
-		if len(self.precommit_votes[msg.view_number]) == QUORUM:
+		if len(self.precommit_votes[msg.view_number]) == Replica.QUORUM:
+			sig = Signature(Replica.N, Replica.F)
+
+			for vote in self.precommit_votes[msg.view_number]:
+				sig.combine(vote.partial_sig)
+
 			qc = QC(
 				Protocol_phase.PRECOMMIT,
 				self.current_view,
-				msg.block
+				msg.block,
+				sig
 			)
-			for vote in self.precommit_votes[msg.view_number]:
-				qc.signature.combine(vote.partial_sig)
 			
 			self.trace(f"Leader formed {qc}")
 			
@@ -303,14 +317,18 @@ class Replica:
 		if msg.block.hash == self.current_proposal.hash:
 			self.commit_votes[msg.view_number].append(msg)
 		
-		if len(self.commit_votes[msg.view_number]) == QUORUM:
+		if len(self.commit_votes[msg.view_number]) == Replica.QUORUM:
+			sig = Signature(Replica.N, Replica.F)
+
+			for vote in self.commit_votes[msg.view_number]:
+				sig.combine(vote.partial_sig)
+
 			qc = QC(
 				Protocol_phase.COMMIT,
 				self.current_view,
-				msg.block
+				msg.block,
+				sig
 			)
-			for vote in self.commit_votes[msg.view_number]:
-				qc.signature.combine(vote.partial_sig)
 			
 			self.trace(f"Leader formed {qc}")
 			

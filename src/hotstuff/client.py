@@ -1,5 +1,6 @@
 import asyncio
 from hotstuff.hotstuff_types import *
+from hotstuff.replica import *
 
 class Client:
 	def __init__(self, client_id, replica_addresses, timeout):
@@ -20,10 +21,11 @@ class Client:
 			try:
 				host, port = self.replica_addresses[replica_id]
 				self.replica_conns[replica_id] = await asyncio.open_connection(host, port)
+				self.trace(f"Connected to {self.replica_addresses[replica_id]}!")
 				return True
 			except ConnectionRefusedError:
-				print("refused")
 				await asyncio.sleep(0.2)
+		self.trace(f"Connection to {self.replica_addresses[replica_id]} failed!")
 		return False
 
 	def trace(self, string):
@@ -56,10 +58,11 @@ class Client:
 	async def broadcast_cmd(self, cmd):
 		responses = []
 		pending = []
+		self.trace(f"Broadcasting {cmd}")
 		for replica_id in self.replica_addresses:
 			pending.append(asyncio.create_task(self.send_cmd(replica_id, cmd)))
 
-		while len(responses) < F + 1:
+		while len(responses) < Replica.F + 1:
 			done, pending = await asyncio.wait(
 				pending,
 				timeout=self.timeout,
@@ -70,7 +73,6 @@ class Client:
 					responses.append(task.result())
 			if not pending:
 				break
-		print(responses)
 
 	async def run(self):
 		while True:

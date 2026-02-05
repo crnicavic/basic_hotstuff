@@ -1,3 +1,7 @@
+N = 4
+F = 1
+QUORUM = 2*F+1
+
 import asyncio
 from hotstuff.hotstuff_types import *
 from hotstuff.network import *
@@ -5,8 +9,7 @@ from hotstuff.replica import *
 from hotstuff.byzantine import *
 from hotstuff.client import *
 
-
-async def simulation():
+async def main():
 	replica_addresses = {
 		0: ('127.0.0.1', 50000),
 		1: ('127.0.0.1', 50001),
@@ -59,9 +62,6 @@ async def simulation():
 			      f"locked view={replica.locked_qc.view_number}")
 			print(f"STATE: {replica.state}")
 			await replica.network.stop_server()
-
-async def main():
-	await simulation()
 
 if __name__ == "__main__":
 	asyncio.run(main())
