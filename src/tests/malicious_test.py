@@ -15,21 +15,20 @@ async def main():
 		3: ('127.0.0.1', 50003)
 	}	
 	replica_types = {
-		0: Fault_types.CRASH,
+		0: Fault_types.MALICIOUS,
 		1: Fault_types.HONEST,
 		2: Fault_types.HONEST,
 		3: Fault_types.HONEST
 	}
 	replicas = []
 	for i in range(N):
-		crash_view = 10
 		address, port = replica_addresses[i]
 		if replica_types[i] == Fault_types.HONEST:
 			network = Network(i, replica_addresses, address, port)
 			replica = Replica(i, network)
-		elif replica_types[i] == Fault_types.CRASH:
-			network = Network(i, replica_addresses, address, port)
-			replica = Crash_replica(i, network, crash_view)
+		elif replica_types[i] == Fault_types.MALICIOUS:
+			network = Malicious_network(i, replica_addresses, address, port)
+			replica = Malicious_replica(i, network)
 		replicas.append(replica)
 	
 	client = Client(0, replica_addresses, 3.0) 

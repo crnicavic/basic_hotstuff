@@ -5,7 +5,7 @@ from hotstuff.replica import *
 from hotstuff.byzantine import *
 from hotstuff.client import *
 
-N = 90
+N = 50
 
 async def main():
 	replica_addresses = {}
@@ -15,8 +15,7 @@ async def main():
 	replicas = []
 	for replica_id in replica_addresses:
 		address, port = replica_addresses[replica_id]
-		network = Network(replica_id, address, port)
-		network.replica_addresses = replica_addresses
+		network = Network(replica_id, replica_addresses, address, port)
 		replica = Replica(replica_id, network, 100)
 		replicas.append(replica)
 

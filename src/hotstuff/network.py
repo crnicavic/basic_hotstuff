@@ -4,11 +4,11 @@ from hotstuff.hotstuff_types import *
 
 # replica's way of talking with the world
 class Network:
-	def __init__(self, replica_id, host='127.0.0.1', port=50000):
+	def __init__(self, replica_id, replica_addresses, host='127.0.0.1', port=50000):
 		# the id of the replica who uses the object
 		self.replica_id = replica_id
 		self.inbox = asyncio.Queue()
-		self.replica_addresses = {} # replica_id -> (host: string, port: int)
+		self.replica_addresses = replica_addresses # replica_id -> (host: string, port: int)
 		self.replica_conns = {} # replica_id -> (reader, writer)
 		self.client_conns = {} # client_id -> (reader, writer)
 		self.server = None

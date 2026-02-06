@@ -1,3 +1,5 @@
+import copy
+import random
 from hotstuff.network import *
 from hotstuff.replica import *
 from hotstuff.hotstuff_types import *
@@ -74,8 +76,12 @@ class Malicious_network(Network):
 	async def broadcast(self, msg):
 		tasks = []
 		for replica_id in self.replica_addresses:
+			cmd = msg.block.cmd
+			mal_cmd = Command(cmd.op, copy.deepcopy(cmd.args), cmd.client_id)
+			mal_cmd.args[1] = random.randint(1, 1000) 
+			mal_cmd.hash = mal_cmd.calculate_hash()
 			mal_block = Block(
-					"malicious_cmd_for_{replica_id}",
+					mal_cmd,
 					msg.justify.block,
 					msg.view_number
 			)
