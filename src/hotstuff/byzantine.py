@@ -67,7 +67,7 @@ class Delayed_network(Network):
 		packet = pickle.dumps(msg)
 		msg_byte_count = len(packet)
 
-		await asyncio.sleep(0.1)
+		await asyncio.sleep(0.01 * msg.view_number)
 		writer.write(msg_byte_count.to_bytes(4, 'big'))
 		writer.write(packet)
 		await writer.drain()
