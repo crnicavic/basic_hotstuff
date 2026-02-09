@@ -62,11 +62,11 @@ prema kome sve replike u sistemu izvršavaju iste operacije u istom redosledu,
 čime se obezbeđuje konzistentno ponašanje sistema i tolerancija na pojedinačne
 otkaze.
 
-Da bi SMR bio ispravno realizovan u realnim uslovima, neophodno je obezbediti
+Da bi SMR bio realizovan u realnim uslovima, neophodno je obezbediti
 saglasnost između replika o redosledu izvršavanja operacija. Ovaj zadatak
 postaje posebno složen u prisustvu vizantijskih otkaza, kada se pojedini
 čvorovi mogu ponašati proizvoljno, uključujući prestanak sa radom ili slanjem
-kontradiktornih informacija drugim učesnicima sistema.
+kontradiktornih informacija drugim učesnicima.
 
 Konsenzus algoritmi opisuju način na koji se čvorovi dogovaraju o redosledu
 izvršavanja operacija. Ukoliko algoritam omogućava sistemu da nastavi sa radom 
@@ -96,4 +96,8 @@ teorijskog okvira razvijena je implementacija algoritma i sprovedena evaluacija
 njegovih karakteristika kroz skup eksperimenata.
 Rezultati ovih eksperimenata korišćeni su za procenu ispravnosti rada algoritma,
 njegove efikasnosti i ponašanja u slučaju vizantijskih otkaza.
+\newpage
+\section{Svojstva protokola i opšti pojmovi}
+\subsection{Bezbednost i živost}
+
 \end{document}
