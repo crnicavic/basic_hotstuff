@@ -57,37 +57,31 @@ današnjih softverskih rešenja.
 
 Jedan od osnovnih pristupa za povećanje pouzdanosti distribuiranih sistema
 jeste replikacija stanja između više čvorova. Ovaj princip formalizovan je kroz
-koncept \textbf{replikacije mašine stanja} (State machine replication - SMR),
+koncept \textbf{replikacije mašine stanja} (\textit{State machine replication - SMR}),
 prema kome sve replike u sistemu izvršavaju iste operacije u istom redosledu,
 čime se obezbeđuje konzistentno ponašanje sistema i tolerancija na pojedinačne
 otkaze.
 
-Da bi SMR bio realizovan u realnim uslovima, neophodno je obezbediti
-saglasnost između replika o redosledu izvršavanja operacija. Ovaj zadatak
-postaje posebno složen u prisustvu vizantijskih otkaza, kada se pojedini
-čvorovi mogu ponašati proizvoljno, uključujući prestanak sa radom ili slanjem
-kontradiktornih informacija drugim učesnicima.
+Da bi SMR bio realizovan u realnim uslovima, neophodno je obezbediti saglasnost
+između replika o redosledu izvršavanja operacija. Ovaj proces mora garantovati
+bezbednost (\textit{safety}), u smislu očuvanja konzistentnosti sistema, kao i živost
+(\textit{liveness}), odnosno mogućnost da sistem nastavi sa radom u prisustvu grešaka.
+Ovi zahtevi postaju naročito složeni u prisustvu vizantijskih otkaza, kada se
+pojedini čvorovi mogu ponašati proizvoljno, uključujući prestanak rada ili
+slanje kontradiktornih informacija drugim učesnicima sistema.
 
 Konsenzus algoritmi opisuju način na koji se čvorovi dogovaraju o redosledu
 izvršavanja operacija. Ukoliko algoritam omogućava sistemu da nastavi sa radom 
 i u prisustvu vizantijskih otkaza, za algoritam se može reći da je tolerantan
 na vizantijske otkaze (Byzantine fault tolerance - BFT).
 
-\textbf{Hotstuff} je BFT konsenzus algoritam zasnovan na vođi (leader-based) 
+\textbf{Hotstuff} je BFT konsenzus algoritam zasnovan na vođi (\textit{leader-based}) 
 koji postiže saglasnost između replika u parcijalno sinhronom mrežnom modelu.
 Kada mrežna komunikacija postane sinhrona, vođa vodi dostizanje dogovora brzinom
 koja je uslovljena karakteristikama mrežne komunikacije, što je osobina koja se
-naziva odzivnost (responsiveness). Komunikaciona složenost algoritma je $O(n)$,
+naziva odzivnost (\textit{responsiveness}). Komunikaciona složenost algoritma je $O(n)$,
 gde je $n$ broj replika u sistemu, dok u slučaju uzastopnih otkaza vođe,
 složenost u najgorem slučaju može dostići $O(n^2)$.
-
-Osnovni princip rada algoritma se zasniva na tome da vođa šalje predlog naredne
-operacije svim replikama, potom one mogu glasati za taj predlog
-ili ostati uzdržane. Ukoliko se prikupi dovoljan broj glasova, vođa formira dokaz
-o dovoljnom broju glasova, poznat kao sertifikat kvoruma (Quorum certificate - QC).
-Nakon toga slede još dve runde glasanja, prva služi za distribuciju sertifikata
-kvoruma, dok druga služi da se naglasi da je operacija spremna za izvršavanje.
-Konačno se ta operacija izvršava, što se evidentira u skup izvršenih operacija.
 
 Ovaj rad obuhvata analizu ključnih principa rada HotStuff algoritma i njegovih
 fundamentalnih struktura podataka, koje omogućuju pouzdano postizanje
@@ -97,7 +91,49 @@ njegovih karakteristika kroz skup eksperimenata.
 Rezultati ovih eksperimenata korišćeni su za procenu ispravnosti rada algoritma,
 njegove efikasnosti i ponašanja u slučaju vizantijskih otkaza.
 \newpage
-\section{Svojstva protokola i opšti pojmovi}
+\section{Svojstva algoritma}
 \subsection{Bezbednost i živost}
+Osnovni zahtevi koje konsenzus algoritam u okviru SMR mora da ispuni jesu
+bezbednost i živost. Bezbednost podrazumeva da sve korektne replike izvršavaju
+operacije u istom redosledu, odnosno da ne može doći do divergentnog stanja
+sistema. Drugim rečima, jednom doneta odluka ne sme biti promenjena niti
+protivrečiti nekoj drugoj odluci donesene od strane korektnih replika.
 
+Živost označava sposobnost sistema da nastavi sa radom i da donosi nove odluke
+uprkos prisustvu grešaka i kašnjenja u komunikaciji. Formalno, živost garantuje
+da će svaka ispravna operacija predložena od strane klijenta u konačnom vremenu
+biti izvršena, pod pretpostavkom da mrežni uslovi postanu dovoljno povoljni.
+
+Ova dva svojstva predstavljaju temelj SMR modela i ne mogu se razmatrati
+nezavisno: protokol koji obezbeđuje samo bezbednost bez živosti dovodi do 
+zastoja sistema, dok protokol koji garantuje živost bez bezbednosti ugrožava
+konzistentnost stanja replika.
+\subsection{Dostizanje konsenzusa zasnovano na vođi}
+U velikom broju savremenih konsenzus algoritama proces postizanja saglasnosti
+organizovan je kroz ulogu vođe, koja se periodično dodeljuje jednom od
+čvorova u sistemu u okviru diskretnih logičkih intervala poznatih kao pogledi
+ili mandati (\textit{views}). Tokom jednog pogleda, izabrani vođa je odgovoran za
+iniciranje predloga narednih operacija, kao i za koordinaciju glasanja, tj.
+prikupljanje odgovora na predloženu operaciju.
+
+Ovakva organizacija izvršavanja  omogućava smanjenje komunikacione složenosti,
+jer se predlozi distribuiraju iz jednog centralnog izvora ka ostalim
+replikama, koje svoje glasove šalju vođi. Na taj način se izbegava situacija u
+kojoj više replika istovremeno predlaže konkurentne operacije, što bi dovelo do
+povećanog broja razmenjenih poruka i složenije sinhronizacije sistema.
+
+Uloga vođe nije trajna i vezana je isključivo za jedan pogled. U slučaju da je
+vođa spor, postane nedostupan ili se ponaša nekorektno, sistem
+prelazi u naredni pogled u kome druga replika preuzima ulogu vođe. Mehanizam
+promene pogleda predstavlja osnovni način očuvanja živosti protokola i sprečava
+da neispravno ponašanje pojedinačnog čvora trajno blokira napredak sistema.
+
+Mana ovog pristupa je u tome što vođa predstavlja jedinstvenu tačku zastoja,
+budući da bilo kakvi otkazi u funkcionisanju vođe izazivaju prestanak rada
+algoritma i zahteva prelazak u sledeći pogled gde će biti odabran drugi vođa.
+Međutim, jedna od glavnih prednosti Hotstuff algoritma jeste brz i jednostavan
+mehanizam promene vođe, čime se omogućuje očuvanje bezbednosti i živosti.
+
+\subsection{Linearna promena pogleda (\textit{Linear view change})}
+\subsection{Optimistična odzivnost (\textit{Optimistic responsiveness})}
 \end{document}
