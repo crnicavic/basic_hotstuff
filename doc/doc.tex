@@ -76,12 +76,10 @@ i u prisustvu vizantijskih otkaza, za algoritam se može reći da je tolerantan
 na vizantijske otkaze (Byzantine fault tolerance - BFT).
 
 \textbf{Hotstuff} je BFT konsenzus algoritam zasnovan na vođi (\textit{leader-based}) 
-koji postiže saglasnost između replika u parcijalno sinhronom mrežnom modelu.
-Kada mrežna komunikacija postane sinhrona, vođa vodi dostizanje dogovora brzinom
-koja je uslovljena karakteristikama mrežne komunikacije, što je osobina koja se
-naziva odzivnost (\textit{responsiveness}). Komunikaciona složenost algoritma je $O(n)$,
-gde je $n$ broj replika u sistemu, dok u slučaju uzastopnih otkaza vođe,
-složenost u najgorem slučaju može dostići $O(n^2)$.
+namenjen realizaciji replikacije mašine stanja u parcijalno sinhronom mrežnom
+modelu. Algoritam je koncipiran sa ciljem da bude primenjiv u sistemima sa
+velikim brojem čvorova, koje se često nazivaju replikama, uz jednostavnu
+strukturu i efikasno dostizanje saglasnosti.
 
 Ovaj rad obuhvata analizu ključnih principa rada HotStuff algoritma i njegovih
 fundamentalnih struktura podataka, koje omogućuju pouzdano postizanje
@@ -135,5 +133,19 @@ Međutim, jedna od glavnih prednosti Hotstuff algoritma jeste brz i jednostavan
 mehanizam promene vođe, čime se omogućuje očuvanje bezbednosti i živosti.
 
 \subsection{Linearna promena pogleda (\textit{Linear view change})}
+
+Linearna promena pogleda predstavlja sposobnost algoritma da nakon stabilizacije
+mrežne komunikacije ispravni vođa sprovede dostizanje saglasnosti replika
+razmenom $O(n)$ poruka, gde $n$ označava broj replika u sistemu. Ukoliko dođe do
+uzastopnih otkaza vođe, u najgorem slučaju broj poruka može biti $O(n^2)$.
+
+\newpage
+
 \subsection{Optimistična odzivnost (\textit{Optimistic responsiveness})}
+
+Optimistična odzivnost podrazumeva osobinu da nakon stabilizacije mreže ispravni
+vođa treba da sakupi dovoljan broj glasova kako bi sastavio predlog koji garantuje
+napredak. To znači da korektni vođa koordiniše dostizanje konsenzusa brzinom
+koja je uslovljena karakteristikama mrežne komunikacije.
+
 \end{document}
