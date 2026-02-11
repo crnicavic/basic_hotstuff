@@ -135,9 +135,16 @@ mehanizam promene vođe, čime se omogućuje očuvanje bezbednosti i živosti.
 \subsection{Linearna promena pogleda (\textit{Linear view change})}
 
 Linearna promena pogleda predstavlja sposobnost algoritma da nakon stabilizacije
-mrežne komunikacije ispravni vođa sprovede dostizanje saglasnosti replika
-razmenom $O(n)$ poruka, gde $n$ označava broj replika u sistemu. Ukoliko dođe do
-uzastopnih otkaza vođe, u najgorem slučaju broj poruka može biti $O(n^2)$.
+mrežne komunikacije omogući ispravnom vođi da sprovede dostizanje saglasnosti
+replika uz razmenu $O(n)$ poruka, gde $n$ označava broj replika u sistemu. Time
+se obezbeđuje da u stabilnim mrežnim uslovima algoritam ostvaruje napredak sa
+minimalnim komunikacionim troškom.
+
+U slučaju otkaza vođe, sistem prelazi u naredni pogled u kome nova replika
+preuzima ulogu vođe i ponavlja postupak dostizanja saglasnosti sa istom
+komunikacionom složenošću. Najgori slučaj $O(n^2)$ javlja se tek usled više
+uzastopnih otkaza vođe, pri čemu se linearni trošak akumulira kroz veći broj
+pogleda.
 
 \newpage
 
@@ -147,5 +154,56 @@ Optimistična odzivnost podrazumeva osobinu da nakon stabilizacije mreže isprav
 vođa treba da sakupi dovoljan broj glasova kako bi sastavio predlog koji garantuje
 napredak. To znači da korektni vođa koordiniše dostizanje konsenzusa brzinom
 koja je uslovljena karakteristikama mrežne komunikacije.
+
+\newpage
+
+\section{Model sistema}
+
+\subsection{Model učesnika i prava pristupa(\textit{permissioned} okruženje)}
+
+HotStuff algoritam je namenjen radu u tzv. \textit{permissioned} okruženju, u
+kome skup učesnika algoritma čini konačan i poznat broj replika. Svaka replika
+poseduje jedinstveni identitet i učestvuje u procesu donošenja odluka u skladu
+sa definisanim pravilima protokola.
+
+Za razliku od \textit{permissionless} sistema, u kojima novi čvorovi mogu
+slobodno pristupati mreži, u permissioned okruženju pristup protokolu je
+ograničen i kontrolisan. Ovakav model je pogodan za sisteme u kojima se zahteva
+veći stepen pouzdanosti, predvidivosti i kontrole nad učesnicima, kao što su
+distribuirane baze podataka, poslovni informacioni sistemi i privatne blokčejn mreže.
+
+Koncept blokčejna može se posmatrati kao specijalan slučaj replikacije mašine stanja,
+u kome se niz izvršenih operacija organizuje u strukturu ulančanih blokova.
+Blok podrazumeva strukturu podataka koja sadrži skup operacija, kao i pokazivač
+ka prethodnom bloku u lancu. Svaka replika održava lokalnu kopiju lanca blokova
+i izvršava iste operacije u istom redosledu, čime se obezbeđuje konzistentno
+stanje sistema.
+
+\subsection{Modeli mrežne komunikacije}
+
+Komunikacija između replika odvija se putem mreže koja može ispoljavati
+različite stepene nepredvidivosti u pogledu kašnjenja poruka. U literaturi se
+najčešće razmatraju tri osnovna mrežna modela: sinhroni, asinhroni i parcijalno
+sinhroni.
+
+U sinhronom mrežnom modelu pretpostavlja se da postoji poznata gornja granica na
+vreme prenosa poruka između replika. Ova pretpostavka omogućava jednostavno
+projektovanje algoritma, ali se retko može garantovati u realnim distribuiranim
+sistemima.
+
+U asinhronom mrežnom modelu ne postoje nikakve pretpostavke o vremenu isporuke
+poruka. Iako ovaj model odražava visoku nepredvidivost mreže, dokazano je da u
+potpuno asinhronom okruženju nije moguće garantovati i bezbednost i živost
+determinističkih BFT konsenzus algoritama.
+
+HotStuff se oslanja na parcijalno sinhroni mrežni model, koji se
+inicijalno ponaša isto kao asinhrona mreža, ali nakon nekog nepoznatog
+vremenskog trenutka stabilizacije mreže (\textit{Global stabilisation time - GST})
+komunikacija između replika postaje sinhrona, odnosno poruke se isporučuju
+unutar neke konačne vremenske granice. Ovaj model omogućava algoritmu da očuva
+bezbednost u svim uslovima rada, dok se živost garantuje tek nakon GST.
+
+\subsection{Vizantijski otkazi}
+
 
 \end{document}
