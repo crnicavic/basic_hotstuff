@@ -186,14 +186,14 @@ različite stepene nepredvidivosti u pogledu kašnjenja poruka. U literaturi se
 najčešće razmatraju tri osnovna mrežna modela: sinhroni, asinhroni i parcijalno
 sinhroni.
 
-U sinhronom mrežnom modelu pretpostavlja se da postoji poznata gornja granica na
-vreme prenosa poruka između replika. Ova pretpostavka omogućava jednostavno
-projektovanje algoritma, ali se retko može garantovati u realnim distribuiranim
-sistemima.
+U sinhronom mrežnom modelu pretpostavlja se da postoji poznata gornja vremenska
+granica prenosa poruka između replika, koja se često označava sa $\Delta$. Ova
+pretpostavka omogućava jednostavno projektovanje algoritma, ali ona retko važi
+u realnim distribuiranim sistemima.
 
-U asinhronom mrežnom modelu ne postoje nikakve pretpostavke o vremenu isporuke
-poruka. Iako ovaj model odražava visoku nepredvidivost mreže, dokazano je da u
-potpuno asinhronom okruženju nije moguće garantovati i bezbednost i živost
+U asinhronom mrežnom modelu ne postoje pretpostavke o vremenu isporuke poruka. 
+Ovaj model odražava visoku nepredvidivost mreže, dokazano je da u potpuno
+asinhronom okruženju nije moguće garantovati i bezbednost i živost
 determinističkih BFT konsenzus algoritama.
 
 HotStuff se oslanja na parcijalno sinhroni mrežni model, koji se
