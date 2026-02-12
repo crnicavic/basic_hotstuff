@@ -223,9 +223,59 @@ ili jednak $3f+1$.
 
 \subsection{Uslovi rada algoritma}
 
+Sistem se sastoji od skupa od $n$ replika, od kojih najviše $f$ može biti
+vizantijski neispravno, pri čemu važi uslov $n \ge 3f + 1$. Replike komuniciraju
+razmenom poruka putem parcijalno sinhrone mreže i organizovane su u diskretne
+logičke intervale izvršavanja, nazvane pogledi (\textit{views}). U svakom
+pogledu tačno jedna replika ima ulogu vođe i odgovorna je za predlaganje
+narednog bloka operacija.
 
+Hotstuff se koristi šemom potpisa sa pragom, u kojoj postoji jedan javni ključ,
+koji je poznat svim replikama, dok svaka replika poseduje jedinstveni privatni
+ključ. U $(k,n)$ šemi potpisa sa pragom, replika može generisati parcijalni
+potpis nad porukom $m$, koji predstavlja glas za odgovarajući predlog. Kada
+vođa pogleda sakupi barem $k$ parcijalnih potpisa, što je u ovom slučaju $2f+1$,
+može ih kombinovati u potpuni potpis koji se naziva serifikat kvoruma (\textit{
+Quorum Certificate - QC}). Svaka replika može verifikovati legitimnost tog
+potpisa pomoću javnog ključa.
+
+Jedna mogućnost kod vizantijski neispravnih replika jeste da one međusobno
+sarađuju, ili da postoji jedan napadač koji upravlja svakom od $f$ neispravnih
+replika. Dokle god taj napadač nema mogućnost da generiše $2f+1$ potpisa, šema
+potpisa sa pragom garantuje bezbednost, zato što nije moguće falsifikovati
+sertifikat kvoruma za predlog za koji iskrene replike neće glasati.
+
+Pored toga, algoritam koristi kriptografsku heš funkciju $h$, koja preslikava
+poruke bilo koje dužine u izlaz fiksne dužine. Heš funkcija mora biti otporna
+na sudare, što omogućava da se vrednost $h(m)$ koristi kao jedinstveni
+identifikator poruke ili bloka u okviru protokola. Na ovaj način se
+pojednostavljuje razmena poruka i verifikacija sertifikata kvoruma.
 
 \subsection{Strukture podataka}
+
+Osnovna struktura podataka na koju se algoritam oslanja jeste \textbf{poruka}
+(\textit{Message}). Ona predstavlja jedinicu komunikacije između replika,
+sadrži informacije o tome u kojoj fazi se algoritam nalazi, predloženi blok oko
+kojeg se replike dogovaraju, kao i redni broj pogleda. Ukoliko poruka dolazi
+od vođe poruka nosi sertifikat kvoruma, a ukoliko je od replike poruka nosi
+parcijalni potpis. Izuzetak za ovo predstavlja slučaj prelaska u sledeći pogled
+kada replika šalje vođi najnoviji sertifikat kvoruma koji poseduje.
+
+Glavni mehanizam bezbednosti jeste \textbf{sertifikat kvoruma}(\textit{ Quorum
+Certificate - QC}). On predstavlja kombinovani potpis i služi kao dokaz da je
+dovoljan broj replika dalo svoj glas za određeni predlog. Pored potpisa uz QC
+se šalju i sam predlog na koji se odnosi, pogled u kojem je sastavljen, kao i
+faza algoritma u kojoj su skupljani potpisi.
+
+Budući da je cela svrha Hotstuff da se replike dogovore oko narednih operacija,
+\textbf{blok} predstavlja kontejner za skup operacija. Blok definišu sam skup
+operacija, visina tj. udaljenost od početnog bloka i pokazivač ka poslednjem
+bloku u lancu izvršenih blokova.
+
 \subsection{Faze algoritma}
+
+Svaki pogled algoritma, tj. razmatranje predloga je podeljeno u faze. Hotstuff
+algoritam ima 3 faze, gde svaka ima sličnu strukturu, a to je da vođa predlaže
+nešto, replike glasaju ili ostaju suzdržane, formira se sertifikat kvoruma
 
 \end{document}
