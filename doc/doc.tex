@@ -110,9 +110,11 @@ konzistentnost stanja replika.
 U velikom broju savremenih konsenzus algoritama proces postizanja saglasnosti
 organizovan je kroz ulogu vođe, koja se periodično dodeljuje jednom od
 čvorova u sistemu u okviru diskretnih logičkih intervala poznatih kao pogledi
-ili mandati (\textit{views}). Tokom jednog pogleda, izabrani vođa je odgovoran za
-iniciranje predloga narednih operacija, kao i za koordinaciju glasanja, tj.
-prikupljanje odgovora na predloženu operaciju.
+ili mandati (\textit{views}). Tokom jednog pogleda, postavljeni vođa je odgovoran
+za iniciranje predloga narednih operacija, kao i za koordinaciju glasanja, tj.
+prikupljanje odgovora na predloženu operaciju. Način biranja vođe je poznat svim
+ispravnim replikama, jer predstavlja determinističku funkciju koja na osnovu
+rednog broja pogleda vraća ko je vođa za određeni pogled.
 
 Ovakva organizacija izvršavanja  omogućava smanjenje komunikacione složenosti,
 jer se predlozi distribuiraju iz jednog centralnog izvora ka ostalim
@@ -256,10 +258,12 @@ pojednostavljuje razmena poruka i verifikacija sertifikata kvoruma.
 Osnovna struktura podataka na koju se algoritam oslanja jeste \textbf{poruka}
 (\textit{Message}). Ona predstavlja jedinicu komunikacije između replika,
 sadrži informacije o tome u kojoj fazi se algoritam nalazi, predloženi blok oko
-kojeg se replike dogovaraju, kao i redni broj pogleda. Ukoliko poruka dolazi
-od vođe poruka nosi sertifikat kvoruma, a ukoliko je od replike poruka nosi
-parcijalni potpis. Izuzetak za ovo predstavlja slučaj prelaska u sledeći pogled
-kada replika šalje vođi najnoviji sertifikat kvoruma koji poseduje.
+kojeg se replike dogovaraju, kao i redni broj pogleda.
+
+Budući da je cela svrha Hotstuff da se replike dogovore oko narednih operacija,
+\textbf{blok} predstavlja kontejner za skup operacija. Blok definišu sam skup
+operacija, visina tj. udaljenost od početnog bloka i pokazivač ka poslednjem
+bloku u lancu izvršenih blokova, kao i sertifikat kvoruma za taj blok.
 
 Glavni mehanizam bezbednosti jeste \textbf{sertifikat kvoruma}(\textit{ Quorum
 Certificate - QC}). On predstavlja kombinovani potpis i služi kao dokaz da je
@@ -267,15 +271,49 @@ dovoljan broj replika dalo svoj glas za određeni predlog. Pored potpisa uz QC
 se šalju i sam predlog na koji se odnosi, pogled u kojem je sastavljen, kao i
 faza algoritma u kojoj su skupljani potpisi.
 
-Budući da je cela svrha Hotstuff da se replike dogovore oko narednih operacija,
-\textbf{blok} predstavlja kontejner za skup operacija. Blok definišu sam skup
-operacija, visina tj. udaljenost od početnog bloka i pokazivač ka poslednjem
-bloku u lancu izvršenih blokova.
+Pored lanca izvršenih operacija, svaka replika mora da čuva i nekoliko lokalnih
+promenljivih radi praćenja stanja algoritma. Pre svega mora da se prati redni
+broj pogleda u kojem se trenutno nalazi. Takođe se drže najnoviji sertifikati
+kvoruma iz prve dve runde glasanja, tj. faze pripreme (\textit{prepareQC}) i
+iz faze pred-potvrđivanja(\textit{lockedQC}). Ova dva sertifikata su bitna zato
+što su potrebni za provere bezbednosti, \textit{prepareQC} se šalje pri prelazu
+u novi pogled, dok je \textit{lockedQC} ključan za izvršavanje funkcije koja
+proverava bezbednost predloga (\textit{safeNode}). Blok je bezbedan ukoliko
+se nastavlja na blok iz \textit{lockedQC} ili ako je iz novijeg pogleda od onog
+u kojem je \textit{lockedQC} nastao.
+
 
 \subsection{Faze algoritma}
 
-Svaki pogled algoritma, tj. razmatranje predloga je podeljeno u faze. Hotstuff
-algoritam ima 3 faze, gde svaka ima sličnu strukturu, a to je da vođa predlaže
-nešto, replike glasaju ili ostaju suzdržane, formira se sertifikat kvoruma
+Hotstuff je organizovan u diskretne logičke jedinice zvane pogledima. Svaki
+pogled je organizovan u sastavljanje predloga, nakon čega slede tri faze
+glasanja i ukoliko se one odviju uspešno, na kraju se operacije u tom bloku
+izvršavaju. Ovakva organizacija garantuje da neće doći do divergencije između
+stanja replika.
 
+Svaki pogled počinje tako što čvorovi šalju poruku prelaska u nov pogled 
+(\textit{new-view message}) vođi za taj mandat koja sa sobom nosi \textit{prepareQC}.
+Sakupljanjem $2f+1$ takvih poruka počinje faza pripreme (\textit{prepare}), u
+kojoj vođa priprema predlog bloka šalje ga svim učesnicima sistema(\textit{broadcast}).
+Po prijemu predloga, replika proverava da li je on bezbedan (\textit{safe node})
+i ukoliko jeste, generiše se potpis koji se šalje vođi.
+
+Sledeća faza je pred-potvrđivanje (\textit{precommit}). Uloga ove faze jeste da
+vođa formira serifikat kvoruma iz faze pripreme(\textit{prepareQC}), kao i 
+distribucija istog. Značaj ovog koraka je takođe u tome što nudi replikama
+opciju da se "predomisle" oko predloga. Po prijemu poruke od vođe, replike
+postavljaju lokalni \textit{prepareQC} na sertifikat koji se nalazi u pristigloj
+poruci od vođe.
+
+Poslednja runda glasanja je faza posvećivanja (\textit{commit}), gde se formira
+sertifikat za fazu pred-potvrđivanja (\textit{precommitQC}) koji se emituje svim
+replikama, po prijemu se postavlja da bude novi \textit{lockedQC} i vraća svoj
+glas vođi. Glavna uloga ove faze jeste potvrđivanje postignutog stanja konsenzusa.
+
+Prikupljanjem glasova i formiranjem  \textit{commitQC}, koji predstavlja dokaz
+da je blok prošao sve runde glasanja, vođa započinje fazu odluke (\textit{decide})
+gde se operacije u tom bloku konačno izvršavaju, tako što šalje poruku koja
+sadrži formirani sertifikat. Po prijemu, replika izvršava operacije i dodaje
+blok u lanac izvršenih. Nakon toga se redni broj pogleda povećava za jedan i ceo
+proces počinje iznova.
 \end{document}
