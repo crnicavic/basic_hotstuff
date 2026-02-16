@@ -405,7 +405,7 @@ lanac izvršenih blokova (\textit{log}), kao i rezultati izvršavanja istih
 \textit{state}.
 
 Glavna logika algoritma implementirana je kroz skup metoda koje odgovaraju fazama
-protokola. Za svaku fazu postoje dve metode: jedna koja se izvršava u slučaju da je
+algoritma. Za svaku fazu postoje dve metode: jedna koja se izvršava u slučaju da je
 replika vođa trenutnog pogleda i druga koja se izvršava u ulozi obične replike.
 Metode koje izvršava vođa sakupljaju poruke određenog tipa i, nakon što se prikupi
 dovoljan broj poruka, emituju odgovarajući predlog ili sertifikat kvoruma svim
@@ -434,10 +434,10 @@ upotrebe, jer uspostavljanje TCP konekcije zahteva trofazni proces inicijalizaci
 
 \subsection{Pejsmejker (implementirano u \textit{replica.py})}
 
-Implementacija pejsmejkera zasniva se na lokalnom tajmeru koji, po isteku
-definisanog vremenskog intervala, poziva metodu za prelazak replike u sledeći
+Implementacija pejsmejkera zasniva se na lokalnom tajmeru koji po isteku
+definisanog vremenskog intervala poziva metodu za prelazak replike u sledeći
 pogled. Parametri konstruktora pejsmejkera su vrednost tajm-auta, koja predstavlja
-maksimalni dozvoljeni vremenski interval bez napretka, i povratna funkcija
+maksimalni dozvoljeni vremenski interval bez napretka, kao i funkcija 
 (\textit{callback}) kojom se započinje novi pogled.
 
 \subsection{Simulacija vizantijskih otkaza (\textit{byzantine.py})}
@@ -455,5 +455,188 @@ metodi za obradu poruka kojom se određuje trenutak prestanka rada replike. Klas
 \textit{Delayed\_replica} i \textit{Malicious\_replica} ostvaruju svoje ponašanje
 izmenom metode \textit{send} iz klase \textit{Network}, čime se omogućuje
 simulacija kašnjenja i slanja različitih poruka.
+
+\subsection{Klijent (\textit{client.py})}
+
+Klijent predstavlja izvor zahteva koje replike u sistemu treba da obrade, on je
+entitet koji inicira rad algoritma. U implementaciji zahtev se opisuje pomoću
+klase \textit{Command} u kojoj se nalazi operacija koju je potrebno izvršiti.
+Kada instancira objekat klase zahteva, klijent serijalizuje taj objekat i šalje
+ga svim replikama.
+
+U okviru ove implementacije podržana je samo jedna vrsta operacije, označena kao
+\textit{set}, koja ima dva argumenta: ime promenljive i njenu novu vrednost.
+U \textit{prepare} fazi algoritma, vođa tog pogleda uzima prvu komandu iz reda
+čekanja, koji ugrađuje u blok koji će predložiti.
+
+Po prijemu \textit{decide} poruke, sve ispravne replike izvršavaju operaciju u
+bloku koji je prošao sve faze glasanja, što podrazumeva ažuriranje lokalnog
+stanja, tj. postavljanje odgovarajuće promenljive na zadatu vrednost. Nakon što
+je zahtev uspešno obrađen, replika šalje klijentu poruku potvrde koja sadrži
+originalnu komandu koju je klijent poslao.
+
+\newpage
+
+\section{Rezultati}
+
+\subsection{Pokretanje simulacija}
+
+Sve simulacije su izvršene u okviru jedne \textit{Python} skripte, pri čemu je 
+svaka replika pokrenuta unutar jednog zadatka(\textit{task}) biblioteke
+\textit{asyncio}. Replike komuniciraju putem TCP poruka preko lokalnog mrežnog
+interfejsa (\textit{localhost}).
+
+Na ovaj način simulira se distribuirano okruženje unutar jednog procesa, čime se
+omogućuje precizna kontrola toka izvršavanja i ponovljivost eksperimenata. Iako
+ovakav pristup ne predstavlja realan distribuiran sistem, on modeluje logiku
+razmene poruka i ponašanje algoritma u prisustvu različitih tipova otkaza.
+
+Pri pokretanju simulacija sa većim brojem replika, može biti neophodno povećati
+maksimalan broj dozvoljenih otvorenih mrežnih konekcija (\textit{sockets}) na
+operativnom sistemu. Ovo ograničenje se na \textit{Unix} sistemima podešava sa 
+komandom \textit{ulimit}, kako bi se omogućilo istovremeno uspostavljanje većeg
+broja TCP veza između replika.
+
+Svi razmatrani testovi se nalaze u okviru direktorijuma \textit{tests} u glavnom
+repozitorijumu projekta i pokreću se pomoću komande:
+\begin{lstlisting}[caption=Komanda za pokretanje testa, captionpos=b]
+			python3 -m tests.<ime_testa>
+\end{lstlisting}
+Ovakva organizacija omogućava jednostavno izvođenje eksperimenata i analizu
+ponašanja sistema u različitim scenarijima rada.
+
+\subsection{Trajanje pogleda u zavisnosti od broja replika
+(\textit{tests/time\_per\_view.py})}
+
+Prvi eksperiment ispituje zavisnost vremena potrebnog za donošenje odluke od
+broja replika. Cilj testa je procena skalabilnosti implementacije HotStuff
+algoritma u stabilnim mrežnim uslovima, bez prisustva vizantijskih otkaza.
+
+\begin{center}
+	\includegraphics[scale=0.9]{trajanje_pogleda.eps}
+	\captionof*{figure}{Slika 1: Vreme potrebno za dostizanje konsenzusa u
+	zavisnosti od broja replika u sistemu}
+\end{center}
+
+\newpage
+
+Ovaj test funkcioniše tako što pokreće algoritam sa različitim brojem replika
+na određeno vreme, potom se dužina izvršavanja deli se brojem uspešno donetih
+odluka. Na slici 1 se nalazi rezultat izvršavanja i može se uočiti približno
+linearan odnos, što je u skladu sa teorijskim očekivanjima o linearnoj 
+komunikacionoj složenosti.
+
+\subsection{Replika koja prestaje sa radom (\textit{tests/crash\_test.py})}
+
+Ovaj eksperiment analizira ponašanje sistema u slučaju kada jedna od replika
+prestane sa radom tokom izvršavanja algoritma. Takav scenario modeluje
+najjednostavniji oblik vizantijskog otkaza, u kome replika više ne učestvuje u
+razmeni poruka. Cilj ove simulacije je da se proveri da li algoritam uspeva da
+očuva živost i nastavi sa donošenjem odluka nakon promene vođe, uprkos trajnom
+ispadanju jednog čvora iz sistema.
+
+\begin{lstlisting}[caption=Ispis u konzoli tokom simulacije sistema sa 
+\textit{Crash} replikom, captionpos=b]
+[R3][HONEST] Entering view 12
+[R1][HONEST] Entering view 12
+[R2][HONEST] Entering view 12
+TIMEOUT
+[R3][HONEST] Entering view 13
+TIMEOUT
+[R1][HONEST] Entering view 13 (LEADER)
+TIMEOUT
+[R2][HONEST] Entering view 13
+[R1][HONEST] Leader proposing Block(v:13, cmd:CMD([C0]: SET ['A', 10]))
+[R1][HONEST] Voting for Block(v:13, cmd:CMD([C0]: SET ['A', 10]))
+[R2][HONEST] Voting for Block(v:13, cmd:CMD([C0]: SET ['A', 10]))
+[R3][HONEST] Voting for Block(v:13, cmd:CMD([C0]: SET ['A', 10]))
+[R1][HONEST] Leader formed QC(type:PREPARE, view:13)
+[R1][HONEST] Leader formed QC(type:PRECOMMIT, view:13)
+[R1][HONEST] Leader formed QC(type:COMMIT, view:13)
+[R1][HONEST] Executed CMD([C0]: SET ['A', 10])
+[R2][HONEST] Executed CMD([C0]: SET ['A', 10])
+[R3][HONEST] Executed CMD([C0]: SET ['A', 10])
+\end{lstlisting}
+
+U ovoj simulaciji je kreirano četiri replike, gde je jedna inicijalizovana kao
+\textit{Crash\_replica} i podešena je tako prestane sa radom u desetom pogledu.
+Na listingu 2 je moguće uočiti da kada ona treba bude vođa, algoritam ne
+napreduje, što dovodi do toga da nakon isteka tajmera pejsmejkera replike prelaze
+u sledeći pogled. Nakon prelaska u sledeći pogled, replike uspešno donose odluku
+o narednom bloku.
+
+\subsection{Usporena replika (\textit{tests/delayed\_test.py})}
+
+U ovom slučaju se razmatra slučaj replike koja ne prestaje sa radom, ali uvodi
+veštačko kašnjenje pre slanja poruka ostalim učesnicima sistema, koje postaje
+sve veće i veće iz pogleda u pogled. 
+
+\begin{lstlisting}[caption=Ispis u konzoli tokom simulacije sistema sa
+\textit{Delated} replikom, captionpos=b]
+[R3][HONEST] Entering view 24
+[R1][HONEST] Entering view 24
+[R2][HONEST] Entering view 24
+[R0][DELAYED] Voting for Block(v:20, cmd:CMD([C0]: SET ['A', 10]))
+TIMEOUT
+[R3][HONEST] Entering view 25
+TIMEOUT
+[R1][HONEST] Entering view 25 (LEADER)
+TIMEOUT
+[R2][HONEST] Entering view 25
+[R1][HONEST] Leader proposing Block(v:25, cmd:CMD([C0]: SET ['A', 10]))
+[R1][HONEST] Voting for Block(v:25, cmd:CMD([C0]: SET ['A', 10]))
+[R2][HONEST] Voting for Block(v:25, cmd:CMD([C0]: SET ['A', 10]))
+[R3][HONEST] Voting for Block(v:25, cmd:CMD([C0]: SET ['A', 10]))
+[R1][HONEST] Leader formed QC(type:PREPARE, view:25)
+[R1][HONEST] Leader formed QC(type:PRECOMMIT, view:25)
+TIMEOUT
+[R0][DELAYED] Entering view 21
+[R1][HONEST] Leader formed QC(type:COMMIT, view:25)
+[R1][HONEST] Executed CMD([C0]: SET ['A', 10])
+[R2][HONEST] Executed CMD([C0]: SET ['A', 10])
+[R3][HONEST] Executed CMD([C0]: SET ['A', 10])
+\end{lstlisting}
+
+Pokretanjem testa se primećuje sličan rezultat kao i kod prethodne simulacije,
+što je moguće videti na listingu 3. Kada replika sa kašnjenjem treba preuzme
+ulogu vođe, ona zaostaje za nekoliko pogleda u odnosu na ostale učesnike sisteme,
+što uzrokuje da tajmeri pejsmejkera ostalih replika isteknu, čime se započinje
+novi pogled.
+
+\subsection{Maliciozna replika (\textit{tests/malicious\_test.py})}
+
+Poslednji eksperiment ispituje ponašanje sistema u prisustvu maliciozne replike
+koja različitim replikama šalje kontradiktorne predloge. Ovakvo ponašanje
+predstavlja tipičan primer vizantijskog otkaza sa proizvoljnim ponašanjem. Cilj
+testa je da se proveri da li mehanizmi zasnovani na sertifikatima kvoruma i
+proveri bezbednosti predloga sprečavaju postizanje divergentnog stanja između
+ispravnih replika.
+
+\begin{lstlisting}[caption=Ispis u konzoli tokom simulacije sistema sa malicioznom
+replikom, captionpos=b]
+[R3][HONEST] Entering view 12
+[R0][MALICIOUS] Entering view 12 (LEADER)
+[R1][HONEST] Entering view 12
+[R2][HONEST] Entering view 12
+[R0][MALICIOUS] Leader proposing Block(v:12, cmd:CMD([C0]: SET ['A', 10]))
+[R0][MALICIOUS] Voting for Block(v:12, cmd:CMD([C0]: SET ['A', 764]))
+[R1][HONEST] Voting for Block(v:12, cmd:CMD([C0]: SET ['A', 420]))
+[R2][HONEST] Voting for Block(v:12, cmd:CMD([C0]: SET ['A', 965]))
+[R3][HONEST] Voting for Block(v:12, cmd:CMD([C0]: SET ['A', 448]))
+TIMEOUT
+[R0][MALICIOUS] Entering view 13
+TIMEOUT
+[R1][HONEST] Entering view 13 (LEADER)
+TIMEOUT
+[R2][HONEST] Entering view 13
+TIMEOUT
+[R3][HONEST] Entering view 13
+\end{lstlisting}
+
+Sa listinga 4 se vidi da svaka replike prima drugačiji predlog i glasa za njega,
+ali kada je vreme da vođa kombinuje glasove, dobija se sertifikat kvoruma koji
+ne prolazi verifikaciju, što znači da replike neće glasati u narednim fazama.
+Zbog toga algoritam prestaje sa napretkom i nakon isteka tajmera pejsmejkera
+replike prelaze u sledeći pogled.
 
 \end{document}
