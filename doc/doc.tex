@@ -3,6 +3,7 @@
 \usetikzlibrary{shapes,arrows}
 \usepackage{anyfontsize}
 \usepackage{microtype}
+\usepackage{listings}
 \usepackage{hyperref}
 \usepackage{indentfirst}
 \usepackage{placeins}
@@ -27,6 +28,7 @@
 \newlength{\plotheight}
 \setlength{\plotheight}{4.5cm}
 \def\plotscale{0.65}
+\lstset{basicstyle=\ttfamily\footnotesize,breaklines=true}
 \begin{document}
 
 \begin{titlepage}
@@ -103,8 +105,8 @@ da će svaka ispravna operacija predložena od strane klijenta u konačnom vreme
 biti izvršena, pod pretpostavkom da mrežni uslovi postanu dovoljno povoljni.
 
 Ova dva svojstva predstavljaju temelj SMR modela i ne mogu se razmatrati
-nezavisno: protokol koji obezbeđuje samo bezbednost bez živosti dovodi do 
-zastoja sistema, dok protokol koji garantuje živost bez bezbednosti ugrožava
+nezavisno: algoritam koji obezbeđuje samo bezbednost bez živosti dovodi do 
+zastoja sistema, dok algoritam koji garantuje živost bez bezbednosti ugrožava
 konzistentnost stanja replika.
 \subsection{Dostizanje konsenzusa zasnovano na vođi}
 U velikom broju savremenih konsenzus algoritama proces postizanja saglasnosti
@@ -125,7 +127,7 @@ povećanog broja razmenjenih poruka i složenije sinhronizacije sistema.
 Uloga vođe nije trajna i vezana je isključivo za jedan pogled. U slučaju da je
 vođa spor, postane nedostupan ili se ponaša nekorektno, sistem
 prelazi u naredni pogled u kome druga replika preuzima ulogu vođe. Mehanizam
-promene pogleda predstavlja osnovni način očuvanja živosti protokola i sprečava
+promene pogleda predstavlja osnovni način očuvanja živosti algoritma i sprečava
 da neispravno ponašanje pojedinačnog čvora trajno blokira napredak sistema.
 
 Mana ovog pristupa je u tome što vođa predstavlja jedinstvenu tačku zastoja,
@@ -166,10 +168,10 @@ koja je uslovljena karakteristikama mrežne komunikacije.
 HotStuff algoritam je namenjen radu u tzv. \textit{permissioned} okruženju, u
 kome skup učesnika algoritma čini konačan i poznat broj replika. Svaka replika
 poseduje jedinstveni identitet i učestvuje u procesu donošenja odluka u skladu
-sa definisanim pravilima protokola.
+sa definisanim pravilima algoritma.
 
 Za razliku od \textit{permissionless} sistema, u kojima novi čvorovi mogu
-slobodno pristupati mreži, u permissioned okruženju pristup protokolu je
+slobodno pristupati mreži, u permissioned okruženju pristup sistemu je
 ograničen i kontrolisan. Ovakav model je pogodan za sisteme u kojima se zahteva
 veći stepen pouzdanosti, predvidivosti i kontrole nad učesnicima, kao što su
 distribuirane baze podataka, poslovni informacioni sistemi i privatne blokčejn mreže.
@@ -250,7 +252,7 @@ sertifikat kvoruma za predlog za koji iskrene replike neće glasati.
 Pored toga, algoritam koristi kriptografsku heš funkciju $h$, koja preslikava
 poruke bilo koje dužine u izlaz fiksne dužine. Heš funkcija mora biti otporna
 na sudare, što omogućava da se vrednost $h(m)$ koristi kao jedinstveni
-identifikator poruke ili bloka u okviru protokola. Na ovaj način se
+identifikator poruke ili bloka u okviru sistema. Na ovaj način se
 pojednostavljuje razmena poruka i verifikacija sertifikata kvoruma.
 
 \subsection{Strukture podataka}
@@ -282,30 +284,32 @@ proverava bezbednost predloga (\textit{safeNode}). Blok je bezbedan ukoliko
 se nastavlja na blok iz \textit{lockedQC} ili ako je iz novijeg pogleda od onog
 u kojem je \textit{lockedQC} nastao.
 
-
 \subsection{Faze algoritma}
 
-Hotstuff je organizovan u diskretne logičke jedinice zvane pogledima. Svaki
-pogled je organizovan u sastavljanje predloga, nakon čega slede tri faze
-glasanja i ukoliko se one odviju uspešno, na kraju se operacije u tom bloku
-izvršavaju. Ovakva organizacija garantuje da neće doći do divergencije između
-stanja replika.
+Hotstuff je organizovan u diskretne logičke jedinice zvane pogledima. U okviru
+svakog pogleda je vođa predlaže novi blok, nakon čega sledi proces donošenja
+odluke koji se sastoji od tri uzastopne runde glasanja. Ukoliko se za svaku
+fazu uspešno formira sertifikat kvoruma, blok se smatra potvrđenim i njegove
+operacije se  izvršavaju. Ovakva organizacija garantuje konzistentno donošenje
+odluka, odnosno sprečava divergenciju stanja između replika.
 
-Svaki pogled počinje tako što čvorovi šalju poruku prelaska u nov pogled 
-(\textit{new-view message}) vođi za taj mandat koja sa sobom nosi \textit{prepareQC}.
-Sakupljanjem $2f+1$ takvih poruka počinje faza pripreme (\textit{prepare}), u
-kojoj vođa priprema predlog bloka šalje ga svim učesnicima sistema(\textit{broadcast}).
-Po prijemu predloga, replika proverava da li je on bezbedan (\textit{safe node})
-i ukoliko jeste, generiše se potpis koji se šalje vođi.
+Svaki pogled počinje slanjem poruke prelaska u novi pogled (\textit{new-view 
+message}) vođi za taj mandat koja sa sobom nosi \textit{prepareQC}. Sakupljanjem
+$2f+1$ takvih poruka počinje faza pripreme(\textit{prepare}).
 
-Sledeća faza je pred-potvrđivanje (\textit{precommit}). Uloga ove faze jeste da
-vođa formira serifikat kvoruma iz faze pripreme(\textit{prepareQC}), kao i 
-distribucija istog. Značaj ovog koraka je takođe u tome što nudi replikama
-opciju da se "predomisle" oko predloga. Po prijemu poruke od vođe, replike
-postavljaju lokalni \textit{prepareQC} na sertifikat koji se nalazi u pristigloj
-poruci od vođe.
+U fazi pripreme vođa sastavlja predlog novog bloka i šalje ga svim replikama
+(\textit{broadcast}). Po prijemu predloga, replika proverava da li je on
+bezbedan pomoću (\textit{safeNode}) funckcije. Ukoliko novi blok ispunjava
+zahteve bezbednosti, replika generiše potpis nad istim i šalje ga vođi kao glas.
 
-Poslednja runda glasanja je faza posvećivanja (\textit{commit}), gde se formira
+Naredna faza je pred-potvrđivanje (\textit{precommit}). Kombinacijom pristiglih
+glasova, vođa generiše serifikat kvoruma iz faze pripreme(\textit{prepareQC}) i 
+distribuira ga svim učesnicima sistema. Po prijemu poruke od vođe, replike
+ažuriraju svoj \textit{prepareQC} na sertifikat koji se nalazi u pristigloj
+poruci od vođe. Glavna poenta ove faze je da informacija o prihvatanju predloga
+stigne do svake replike.
+
+Poslednja runda glasanja je faza posvećivanja (\textit{commit}), gde vođa pravi
 sertifikat za fazu pred-potvrđivanja (\textit{precommitQC}) koji se emituje svim
 replikama, po prijemu se postavlja da bude novi \textit{lockedQC} i vraća svoj
 glas vođi. Glavna uloga ove faze jeste potvrđivanje postignutog stanja konsenzusa.
@@ -316,4 +320,140 @@ gde se operacije u tom bloku konačno izvršavaju, tako što šalje poruku koja
 sadrži formirani sertifikat. Po prijemu, replika izvršava operacije i dodaje
 blok u lanac izvršenih. Nakon toga se redni broj pogleda povećava za jedan i ceo
 proces počinje iznova.
+
+\subsection{Lančani(\textit{chained}) Hotstuff}
+
+U osnovnoj verziji HotStuff algoritma neophodne su tri uzastopne faze glasanja
+kako bi se predloženi blok mogao konačno izvršiti. Sve ove faze imaju sličnu
+strukturu, što otvara mogućnost za povećanje efikasnosti algoritma razmatranjem
+više predloga istovremeno.
+
+Lančani HotStuff (\textit{Chained HotStuff}) ovo unapređenje postiže preklapanjem
+faza različitih pogleda. Drugim rečima, u pogledu $v$ jedan vođa istovremeno
+koordiniše fazu \textit{prepare} za blok $b_1$, fazu \textit{precommit} za blok
+$b_2$, fazu \textit{commit} za blok $b_3$, kao i fazu \textit{decide} za blok
+$b_4$.
+
+Pored toga, lančana verzija algoritma pojednostavljuje strukturu algoritma tako
+što eliminiše posebne tipove sertifikata kvoruma za svaku fazu. Umesto toga se
+koristi generični sertifikat kvoruma (\textit{genericQC}), što takođe znači da
+je moguće da se smanji i broj tipova poruka. Potrebna je samo generična poruka
+(\textit{generic}) i poruka prelaska u novi pogled (\textit{new view}).
+
+U okviru ovog rada razmatra se i implementira isključivo osnovna verzija HotStuff
+algoritma, dok se lančana varijanta navodi radi potpunijeg razumevanja principa
+rada i mogućih optimizacija.
+
+\subsection{Očuvanje živosti pomoću pejsmejkera (\textit{pacemaker})}
+
+Hotstuff je koncipiran tako da mehanizmi koji garantuju bezbednost budu odvojeni
+od mehanizama koji garantuju živost algoritma. Glavni načini za postizanje
+bezbednosti su sertifikati kvoruma i \textit{safeNode} funkcija, dok se živost
+postiže pomoću komponente koja se naziva pejsmejker (\textit{pacemaker}).
+
+Funkcionisanje pejsmejkera je vrlo jednostavno, zasniva se na upotrebi lokalnih
+tajmera kod replika. Ukoliko u određenom vremenskom intervalu proces donošenja
+odluke ne napreduje, replika inicira prelazak u sledeći pogled. Ovaj vremenski
+interval se naziva tajm-aut (\textit{timeout}) i bira se u skladu sa pretpostavkama
+uslova mrežne komunikacije. Na ovaj način se obezbeđuje da sistem ne ostane
+trajno blokiran usled sporog ili neispravnog vođe.
+
+\newpage
+
+\section{Implementacija}
+
+\subsection{Osnovni tipovi (\textit{hotstuff\_types.py})}
+
+Implementacija algoritma zasniva se na teorijskom modelu koji je opisan u
+prethodnom poglavlju, uz određena pojednostavljenja koja su uvedena radi lakše
+realizacije i jasnije analize ponašanja.
+
+U okviru implementacije nisu realizovane kriptografske primitive, uključujući
+šemu potpisa sa pragom, upravljanje privatnim i javnim ključevima, kao ni
+kriptografske heš funkcije. Umesto toga, koristi se idealizovan mehanizam koji
+se zasniva na računanju heš vrednosti poruke.
+
+Parcijalni potpis podrazumeva računanje heš vrednosti torke koja sadrži redni
+broj pogleda, fazu algoritma i heš vrednost bloka koji se razmatra. Kombinacija
+ovih potpisa podrazumeva njihovo dodavanje u niz. Takav kombinovani potpis se
+verifikuje proverom da li postoji najmanje $2f+1$ identičnih parcijalnih
+potpisa, čime se simulira prag potreban za formiranje potpunog potpisa.
+
+Sertifikati kvoruma se u implementaciji modeluju kao strukture podataka koje
+sadrže fazu formiranja, redni broj pogleda, blok na koji se odnosi i objekat
+klase koja modeluje kombinovani potpis.
+
+U okviru implementacije svaki blok sadrži tačno jednu operaciju, čime se dodatno
+pojednostavljuje obrada predloga i omogućava preciznije praćenje toka izvršavanja
+algoritma tokom eksperimentalne evaluacije.
+
+\subsection{Osnovni(\textit{basic}) Hotstuff (\textit{replica.py})}
+
+Replika predstavlja osnovnu logičku jedinicu sistema i implementira kompletnu
+logiku HotStuff algoritma, što je ovde urađeno u klasi \textit{Replica}. Pored
+samog algoritma, klasa implementira i dodatne metode koje omogućuju jasnije 
+praćenje dešavanja poput \textit{trace} i metode koje se koriste za slanje poruka
+preko mreže \textit{send} i \textit{broadcast}.
+
+Budući da svaka replika treba da lokalno prati trenutno stanje algoritma, početne
+vrednosti tih promenljivih se postavljaju unutar konstruktora. Njegovi parametri
+su identifikacioni broj, koji služi da bi bilo poznato koja replika je vođa kog
+pogleda, objekat klase \textit{network} koji se koristi za komunikaciju sa drugim
+učesnicima sistema, kao i vreme tajm-auta pejsmejkera. Ostale promenljive koje
+se postavljaju su redni broj pogleda, \textit{prepareQC} i \textit{lockedQC},
+lanac izvršenih blokova (\textit{log}), kao i rezultati izvršavanja istih
+\textit{state}.
+
+Glavna logika algoritma implementirana je kroz skup metoda koje odgovaraju fazama
+protokola. Za svaku fazu postoje dve metode: jedna koja se izvršava u slučaju da je
+replika vođa trenutnog pogleda i druga koja se izvršava u ulozi obične replike.
+Metode koje izvršava vođa sakupljaju poruke određenog tipa i, nakon što se prikupi
+dovoljan broj poruka, emituju odgovarajući predlog ili sertifikat kvoruma svim
+učesnicima sistema. Metode koje izvršava obična replika najpre resetuju pejsmejker
+usled prijema poruke, zatim proveravaju njenu ispravnost i bezbednost predloga,
+a potom generišu parcijalni potpis i šalju svoj glas vođi pogleda.
+
+\subsection{Mrežna komunikacija pomoću \textit{network} klase (\textit{network.py})}
+
+Komunikacija između replika se ostvaruje slanjem serijalizovanih objekata poruka
+pomoću TCP protokola. Konstruktor klase \textit{Network} kao parametre prima
+identifikacioni broj replike koja će koristiti objekat, rečnik koji objedinjuje
+sve identifikacione brojeve replika sa njihovim adresama i na kraju \textit{IP}
+adresu i port na kojem će replika primati poruke.
+
+Po prijemu poruke se poziva metoda \textit{recv} koja poruku dodaje u red poruka
+koje treba da se obrade. U slučaju da poruka potiče od klijenta, objekti namenjeni
+za komunikaciju sa klijentom se posebno čuvaju kako bi mu se kasnije odgovorilo
+da je njegov zahtev uspešno obrađen.
+
+Slanje poruka realizuje se metodom \textit{send}, koja uspostavlja TCP konekciju
+ka ciljnoj adresi i portu, zatim serijalizuje dužinu poruke i njen sadržaj koje 
+šalje preko uspostavljene veze. Objekti komunikacije se keširaju radi ponovne
+upotrebe, jer uspostavljanje TCP konekcije zahteva trofazni proces inicijalizacije
+(\textit{three-way handshake}), što bi u suprotnom usporilo rad algoritma.
+
+\subsection{Pejsmejker (implementirano u \textit{replica.py})}
+
+Implementacija pejsmejkera zasniva se na lokalnom tajmeru koji, po isteku
+definisanog vremenskog intervala, poziva metodu za prelazak replike u sledeći
+pogled. Parametri konstruktora pejsmejkera su vrednost tajm-auta, koja predstavlja
+maksimalni dozvoljeni vremenski interval bez napretka, i povratna funkcija
+(\textit{callback}) kojom se započinje novi pogled.
+
+\subsection{Simulacija vizantijskih otkaza (\textit{byzantine.py})}
+
+Radi demonstracije tolerancije algoritma na vizantijske otkaze, implementirani
+su različiti oblici ponašanja replika. Razmatrana su sledeća ponašanja:
+replika koja u određenom pogledu u potpunosti prestaje sa radom (\textit{Crash\_replica}),
+replika koja uvodi sve veća kašnjenja u slanju poruka (\textit{Delayed\_replica})
+i replika koja različitim učesnicima sistema šalje međusobno kontradiktorne
+predloge (\textit{Malicious\_replica}).
+
+Ove replike su implementirane nasleđivanjem klase \textit{Replica} uz
+redefinisanje manjeg broja metoda. Klasa \textit{Crash\_replica} uvodi proveru u
+metodi za obradu poruka kojom se određuje trenutak prestanka rada replike. Klase
+\textit{Delayed\_replica} i \textit{Malicious\_replica} ostvaruju svoje ponašanje
+izmenom metode \textit{send} iz klase \textit{Network}, čime se omogućuje
+simulacija kašnjenja i slanja različitih poruka.
+
 \end{document}
