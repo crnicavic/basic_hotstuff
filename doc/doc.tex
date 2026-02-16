@@ -639,4 +639,31 @@ ne prolazi verifikaciju, što znači da replike neće glasati u narednim fazama.
 Zbog toga algoritam prestaje sa napretkom i nakon isteka tajmera pejsmejkera
 replike prelaze u sledeći pogled.
 
+\newpage
+
+\section{Zaključak}
+
+U ovom radu je analiziran i implementiran HotStuff BFT konsenzus algoritam za
+realizaciju replikacije mašine stanja u parcijalno sinhronom mrežnom modelu.
+Poseban akcenat stavljen je na razumevanje osnovnih principa rada algoritma,
+njegovih struktura podataka i mehanizama koji obezbeđuju bezbednost i živost
+sistema.
+
+Na osnovu teorijskog modela, implementirana je osnovna verzija algoritma, koja
+je prilagođena eksperimentalnog evaluaciji i sadrži određena pojednostavljenja.
+Pre svega, kriptografske osnove kojima se algoritam koristi su zamenjene
+idealizovanim mehanizmima.
+
+Sprovedeni eksperimenti pokazali su da algoritam uspešno postiže bezbednost i
+živost u prisustvu različitih tipova vizantijskih otkaza. Demonstrirana ponašanja
+su trajni prestanak rada replike, usporeno ponašanje i slanje kontradiktornih
+poruka. Rezultati takođe potvrđuju očekivanu zavisnost vremena izvršavanja od
+broja replika, u skladu sa linearnom komunikacionom složenošću protokola u
+stabilnim mrežnim uslovima.
+
+Kao pravci budućeg rada nameću se implementacija lančane verzije HotStuff
+algoritma (Chained HotStuff) sa realnim kriptografskim osnovama, kao i
+izvršavanje eksperimenata u stvarnom distribuiranom okruženju sa fizički
+razdvojenim čvorovima. 
+
 \end{document}
