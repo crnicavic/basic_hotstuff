@@ -358,6 +358,12 @@ interval se naziva tajm-aut (\textit{timeout}) i bira se u skladu sa pretpostavk
 uslova mrežne komunikacije. Na ovaj način se obezbeđuje da sistem ne ostane
 trajno blokiran usled sporog ili neispravnog vođe.
 
+Drugi sastavni deo pejsmejkera je logika za određivanje vođe u svakom pogledu.
+Izbor vođe mora biti determinističan i unapred poznat svim ispravnim replikama.
+Najjednostavniji način za postizanje toga je promena vođe u svakom pogledu,
+primenom \textit{round robin} strategije. Drugim rečima, u toku $n$ uzastopnih
+pogleda, svaka replika će dobiti tačno jedan mandat kao vođa konsenzusa.
+
 \newpage
 
 \section{Implementacija}
@@ -439,6 +445,11 @@ definisanog vremenskog intervala poziva metodu za prelazak replike u sledeći
 pogled. Parametri konstruktora pejsmejkera su vrednost tajm-auta, koja predstavlja
 maksimalni dozvoljeni vremenski interval bez napretka, kao i funkcija 
 (\textit{callback}) kojom se započinje novi pogled.
+
+Pored logike prelaska u sledeći pogled, klasa koja opisuje pejsmejker implementira i
+metodu \textit{get\_leader} koja određuje vođu u trenutnom pogledu, u skladu sa
+\textit{round robin} strategijom. To se postiže računanjem ostatka deljenja
+trenutnog pogleda sa ukupnim brojem replika u sistemu.
 
 \subsection{Simulacija vizantijskih otkaza (\textit{byzantine.py})}
 
